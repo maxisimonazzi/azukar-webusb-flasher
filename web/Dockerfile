@@ -8,6 +8,7 @@ COPY web/package.json ./
 RUN npm install
 
 COPY web/ ./
+COPY boards ./boards
 RUN npm run build
 
 FROM nginx:1.27-alpine

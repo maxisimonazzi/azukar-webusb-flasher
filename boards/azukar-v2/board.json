@@ -1,0 +1,23 @@
+{
+  "id": "azukar-v2",
+  "title": "Azukar v2",
+  "fpga": {
+    "arch": "ice40",
+    "nextpnr_device": "hx8k",
+    "nextpnr_package": "tq144:4k",
+    "pcf": "pins.pcf"
+  },
+  "programmer": {
+    "chip": "FT2232H",
+    "vid": 1027,
+    "pid": 24592,
+    "channel": "A",
+    "adbus": {
+      "sck": 0,
+      "mosi": 1,
+      "cs": 4,
+      "cdone": 6,
+      "creset": 7
+    }
+  }
+}
