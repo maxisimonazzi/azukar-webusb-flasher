@@ -10,8 +10,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 1000 --home-dir /tmp --shell /usr/sbin/nologin compiler
 
+COPY boards /boards
+COPY toolchain/compile_server.py /app/compile_server.py
+
 WORKDIR /work
 USER compiler
-
-# El HTTP de compile llega más adelante. Por ahora la imagen solo existe.
-CMD ["sleep", "infinity"]
+EXPOSE 8090
+CMD ["python3", "-u", "/app/compile_server.py"]

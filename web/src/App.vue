@@ -5,6 +5,7 @@ import VerilogEditor from '@/components/VerilogEditor.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import { FLASH_CONSOLE_BYTES, formatHexDump, toIntelHex } from '@/fpga/flashDump'
 import { trimIce40Image } from '@/fpga/flashPlan'
+import { compileFpga } from '@/fpga/compile'
 import {
   closeMpsseSession,
   connectMpsse,
@@ -35,6 +36,7 @@ const top = ref(BLINKY_TOP)
 const bin = shallowRef<Uint8Array | null>(null)
 const logText = ref('')
 const error = ref('')
+const busyCompile = ref(false)
 const usbAction = ref<UsbAction | null>(null)
 const boardConnected = ref(false)
 const uploadThen = ref<'flash' | null>(null)
@@ -52,6 +54,7 @@ const logPending: string[] = []
 
 const slimBtn = '!h-[25px] min-h-[25px] px-2 text-xs rounded-md'
 const usbBusy = computed(() => usbAction.value != null)
+const uiLocked = computed(() => busyCompile.value)
 const hasBin = computed(() => bin.value != null && bin.value.length > 0)
 const progressPct = computed(() => {
   if (progressTotal.value <= 0) return 0
@@ -98,6 +101,36 @@ function setBin(next: Uint8Array) {
   bin.value = markRaw(next)
   if (binObjectUrl.value) URL.revokeObjectURL(binObjectUrl.value)
   binObjectUrl.value = URL.createObjectURL(new Blob([next], { type: 'application/octet-stream' }))
+}
+
+function clipLog(text: string, maxChars = 40_000): string {
+  if (text.length <= maxChars) return text
+  return `… (log recortado, ${maxChars} caracteres)\n${text.slice(-maxChars)}`
+}
+
+async function onCompile() {
+  error.value = ''
+  showNoBin.value = false
+  if (busyCompile.value) return
+  busyCompile.value = true
+  appendLog('Yosys → nextpnr-ice40 → icepack…')
+  try {
+    const result = await compileFpga(
+      [{ name: 'azukar_lab.v', content: source.value }],
+      top.value.trim() || BLINKY_TOP,
+    )
+    if (result.log) appendLog(clipLog(result.log))
+    if (result.status === 'success' && result.bin) {
+      setBin(result.bin)
+      appendLog(`Binario listo: ${result.bin.length} bytes.`)
+    } else if (result.status !== 'success') {
+      error.value = 'La síntesis no produjo un .bin.'
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'No se pudo iniciar la compilación.'
+  } finally {
+    busyCompile.value = false
+  }
 }
 
 function onProgress(done: number, total: number, phase: string) {
@@ -417,6 +450,14 @@ onBeforeUnmount(() => {
             <div class="mt-1.5 flex flex-nowrap items-center gap-1.5">
               <AppButton
                 size="sm"
+                :class="slimBtn"
+                :disabled="uiLocked || usbBusy"
+                @click="onCompile"
+              >
+                {{ busyCompile ? 'Compilando…' : 'Compilar' }}
+              </AppButton>
+              <AppButton
+                size="sm"
                 variant="outline"
                 :class="slimBtn"
                 :disabled="!hasBin"
@@ -428,7 +469,7 @@ onBeforeUnmount(() => {
               <details class="relative">
                 <summary
                   class="inline-flex h-[25px] cursor-pointer list-none items-center rounded-md border border-border bg-surface-2 px-2 text-xs font-semibold text-fg hover:bg-surface-3 [&::-webkit-details-marker]:hidden"
-                  :class="usbBusy ? 'pointer-events-none opacity-60' : ''"
+                  :class="usbBusy || uiLocked ? 'pointer-events-none opacity-60' : ''"
                 >
                   {{ usbAction === 'program' ? 'Grabando…' : 'Grabar en flash' }}
                 </summary>
@@ -495,7 +536,7 @@ onBeforeUnmount(() => {
           </div>
           <div ref="logEl" class="min-h-0 flex-1 overflow-y-auto">
             <pre class="p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-fg">{{
-              logText || 'Log de timings del grabado (canal A / WebUSB). Todavía no hay compile.'
+              logText || 'Log de síntesis y timings del grabado (canal A / WebUSB).'
             }}</pre>
           </div>
         </div>
@@ -507,8 +548,9 @@ onBeforeUnmount(() => {
       class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
     >
       <div class="max-w-md rounded-xl border border-border bg-surface p-5 shadow-lg">
-        <p class="text-sm text-fg">No hay .bin. Subí uno para grabar la flash.</p>
+        <p class="text-sm text-fg">No hay .bin. ¿Lo compilo con el código de la pantalla o subís uno?</p>
         <div class="mt-4 flex flex-wrap gap-2">
+          <AppButton @click="showNoBin = false; void onCompile()">Compilar</AppButton>
           <AppButton variant="secondary" @click="onChooseUpload">Subir .bin</AppButton>
           <AppButton variant="outline" @click="showNoBin = false">Cancelar</AppButton>
         </div>
