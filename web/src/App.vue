@@ -3,9 +3,17 @@ import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRe
 
 import VerilogEditor from '@/components/VerilogEditor.vue'
 import AppButton from '@/components/ui/AppButton.vue'
+import { compileFpga } from '@/fpga/compile'
+import {
+  addFpgaFile,
+  closeFpgaTab,
+  deleteFpgaFile,
+  openFpgaTab,
+  visibleFpgaTabs,
+  type FpgaFile,
+} from '@/fpga/files'
 import { FLASH_CONSOLE_BYTES, formatHexDump, toIntelHex } from '@/fpga/flashDump'
 import { trimIce40Image } from '@/fpga/flashPlan'
-import { compileFpga } from '@/fpga/compile'
 import {
   closeMpsseSession,
   connectMpsse,
@@ -17,7 +25,8 @@ import {
   readIce40Flash,
   resetIce40FromFlash,
 } from '@/fpga/programmer'
-import { BLINKY_TOP, BLINKY_VERILOG } from '@/fpga/starter'
+import { BLINKY_TOP, FPGA_STARTER } from '@/fpga/starter'
+import { verilogFilesFromZip, verilogFilesToZip } from '@/fpga/zipVerilog'
 import {
   EDITOR_FONT_DEFAULT,
   EDITOR_FONT_MAX,
@@ -31,7 +40,8 @@ type DumpDest = 'console' | 'bin' | 'hex'
 type UsbAction = 'connect' | 'disconnect' | 'program' | 'erase' | 'reset' | 'read' | 'eeprom'
 
 const isDark = computed(() => themeRef.value === 'dark')
-const source = ref(BLINKY_VERILOG)
+const files = ref<FpgaFile[]>(FPGA_STARTER.map((f) => ({ ...f })))
+const activeName = ref(FPGA_STARTER[0]?.name ?? 'azukar_lab.v')
 const top = ref(BLINKY_TOP)
 const bin = shallowRef<Uint8Array | null>(null)
 const logText = ref('')
@@ -45,6 +55,7 @@ const progressTotal = ref(0)
 const progressLabel = ref('')
 const showNoBin = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+const zipInput = ref<HTMLInputElement | null>(null)
 const logEl = ref<HTMLElement | null>(null)
 const editorFontPx = ref(EDITOR_FONT_DEFAULT)
 const binObjectUrl = ref<string | null>(null)
@@ -63,9 +74,14 @@ const progressPct = computed(() => {
 const showProgress = computed(
   () => usbAction.value === 'program' || usbAction.value === 'read',
 )
+const openTabs = computed(() => visibleFpgaTabs(files.value))
+const activeFile = computed(
+  () => files.value.find((f) => f.name === activeName.value && f.open) ?? null,
+)
 const lineCount = computed(() => {
-  if (!source.value) return 0
-  return source.value.split('\n').length
+  const text = activeFile.value?.content ?? ''
+  if (!text) return 0
+  return text.split('\n').length
 })
 
 function onTheme(next: AppTheme) {
@@ -76,6 +92,70 @@ function onTheme(next: AppTheme) {
 
 function bumpFont(delta: number) {
   editorFontPx.value = clampEditorFontSize(editorFontPx.value + delta)
+}
+
+function setActiveContent(content: string) {
+  files.value = files.value.map((f) =>
+    f.name === activeName.value ? { ...f, content } : f,
+  )
+}
+
+function onOpenFile(name: string) {
+  files.value = openFpgaTab(files.value, name)
+  activeName.value = name
+}
+
+function onCloseTab(name: string) {
+  files.value = closeFpgaTab(files.value, name)
+  if (activeName.value !== name) return
+  const next = visibleFpgaTabs(files.value)[0]
+  activeName.value = next?.name ?? ''
+}
+
+function onAddFile() {
+  const next = addFpgaFile(files.value)
+  if (next.length === files.value.length) return
+  files.value = next
+  const added = next[next.length - 1]
+  if (added) activeName.value = added.name
+}
+
+function onDeleteFile(name: string) {
+  if (files.value.length <= 1) return
+  const next = deleteFpgaFile(files.value, name)
+  files.value = next
+  if (activeName.value === name) {
+    const open = visibleFpgaTabs(next)[0]
+    activeName.value = open?.name ?? next[0]?.name ?? ''
+  }
+}
+
+function onImportZip() {
+  zipInput.value?.click()
+}
+
+function onExportZip() {
+  const zip = verilogFilesToZip(files.value.map((f) => ({ name: f.name, content: f.content })))
+  downloadNamed('azukar-proyecto.zip', new Blob([zip], { type: 'application/zip' }))
+}
+
+async function onZipFile(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  try {
+    const imported = await verilogFilesFromZip(await file.arrayBuffer())
+    if (imported.length === 0) {
+      error.value = 'El zip no tiene archivos .v (nombre tipo and2.v).'
+      return
+    }
+    files.value = imported.map((f) => ({ ...f, open: true }))
+    activeName.value = files.value[0]?.name ?? ''
+    appendLog(`Importé ${imported.length} .v desde ${file.name}. No se guarda; vive en esta ventana.`)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'No pude leer el zip.'
+  }
 }
 
 function flushLog() {
@@ -116,7 +196,7 @@ async function onCompile() {
   appendLog('Yosys → nextpnr-ice40 → icepack…')
   try {
     const result = await compileFpga(
-      [{ name: 'azukar_lab.v', content: source.value }],
+      files.value.map((f) => ({ name: f.name, content: f.content })),
       top.value.trim() || BLINKY_TOP,
     )
     if (result.log) appendLog(clipLog(result.log))
@@ -361,43 +441,154 @@ onBeforeUnmount(() => {
     </header>
 
     <div class="flex min-h-0 flex-1 gap-4 px-4 py-3">
-      <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">
-        <div class="flex shrink-0 items-center gap-3 border-b border-border bg-surface-2 px-3 py-1.5">
-          <label class="text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase" for="fpga-top">
-            Módulo top
-          </label>
-          <input
-            id="fpga-top"
-            v-model="top"
-            class="w-40 rounded-md border border-border bg-surface px-2 py-1 font-mono text-xs"
-          >
-          <span class="ml-auto text-sm font-semibold text-fg">{{ lineCount }} líneas</span>
-          <div class="flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1">
+      <section class="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-border bg-surface">
+        <aside class="flex w-[11.5rem] shrink-0 flex-col overflow-y-auto border-r border-border">
+          <div class="px-2 pt-3 pb-1">
+            <label class="mb-1 block text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase" for="fpga-top">
+              Módulo top
+            </label>
+            <input
+              id="fpga-top"
+              v-model="top"
+              class="w-full rounded-md border border-border bg-surface-2 px-2 py-1 font-mono text-xs"
+            >
+          </div>
+          <div class="flex items-center gap-1 px-2 pt-2 pb-2">
+            <p class="min-w-0 flex-1 px-1 text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase">
+              Archivos
+            </p>
             <button
               type="button"
-              class="cursor-pointer rounded px-1 py-0.5 text-sm text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-30"
-              :disabled="editorFontPx <= EDITOR_FONT_MIN"
-              @click="bumpFont(-1)"
+              class="rounded-sm border border-dashed border-primary/60 px-1.5 py-0 text-sm font-bold text-primary hover:bg-primary/10"
+              title="Crear archivo"
+              @click="onAddFile"
             >
-              A−
-            </button>
-            <span class="min-w-[2rem] text-center text-sm font-semibold text-fg">{{ editorFontPx }}</span>
-            <button
-              type="button"
-              class="cursor-pointer rounded px-1 py-0.5 text-sm text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-30"
-              :disabled="editorFontPx >= EDITOR_FONT_MAX"
-              @click="bumpFont(1)"
-            >
-              A+
+              +
             </button>
           </div>
-        </div>
-        <div class="min-h-0 flex-1 p-2">
-          <VerilogEditor
-            v-model="source"
-            :font-size="editorFontPx"
-            height-class="h-full min-h-0"
-          />
+          <ul class="flex flex-col pb-2">
+            <li v-for="f in files" :key="f.name">
+              <div
+                class="flex items-stretch"
+                :class="f.name === activeName && f.open ? 'bg-surface-2' : ''"
+              >
+                <button
+                  type="button"
+                  class="min-w-0 flex-1 truncate px-3 py-1.5 text-left font-mono text-sm"
+                  :class="
+                    f.open
+                      ? f.name === activeName
+                        ? 'font-semibold text-fg'
+                        : 'text-fg hover:text-primary'
+                      : 'text-muted hover:text-fg'
+                  "
+                  :title="f.name"
+                  @click="onOpenFile(f.name)"
+                >
+                  {{ f.name }}
+                </button>
+                <button
+                  type="button"
+                  class="shrink-0 px-2 text-muted hover:text-error disabled:opacity-30"
+                  :disabled="files.length <= 1"
+                  title="Borrar archivo"
+                  @click="onDeleteFile(f.name)"
+                >
+                  ×
+                </button>
+              </div>
+            </li>
+          </ul>
+        </aside>
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div class="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-surface-2 px-2 py-0">
+            <div class="flex min-w-0 flex-1 items-stretch overflow-x-auto" role="tablist">
+              <button
+                v-for="f in openTabs"
+                :key="f.name"
+                type="button"
+                role="tab"
+                :aria-selected="f.name === activeName"
+                class="relative shrink-0 border-t-2 px-3 py-2 text-sm font-semibold whitespace-nowrap"
+                :class="
+                  f.name === activeName
+                    ? 'border-primary bg-surface text-fg'
+                    : 'border-transparent text-muted hover:bg-surface/60 hover:text-fg'
+                "
+                @click="activeName = f.name"
+              >
+                {{ f.name }}
+                <span
+                  class="ml-2 text-muted hover:text-error"
+                  title="Cerrar pestaña (el archivo queda en el árbol)"
+                  @click.stop="onCloseTab(f.name)"
+                >×</span>
+              </button>
+              <button
+                type="button"
+                class="my-1 ml-1 self-center rounded-sm border border-dashed border-primary/60 px-2 py-0.5 text-sm font-bold text-primary hover:bg-primary/10"
+                title="Crear archivo"
+                @click="onAddFile"
+              >
+                +
+              </button>
+            </div>
+            <div class="ml-auto flex items-center gap-2 py-1 pr-1">
+              <button
+                type="button"
+                class="cursor-pointer rounded-md p-1.5 text-muted hover:bg-surface hover:text-fg"
+                title="importar proyecto"
+                @click="onImportZip"
+              >
+                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="cursor-pointer rounded-md p-1.5 text-muted hover:bg-surface hover:text-fg"
+                title="exportar proyecto"
+                @click="onExportZip"
+              >
+                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M5 20h14v-2H5v2zm7-18l-5 5h3v6h4V7h3l-5-5z" />
+                </svg>
+              </button>
+              <span class="text-sm font-semibold text-fg">{{ lineCount }} líneas</span>
+              <div class="flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1">
+                <button
+                  type="button"
+                  class="cursor-pointer rounded px-1 py-0.5 text-sm text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-30"
+                  :disabled="editorFontPx <= EDITOR_FONT_MIN"
+                  @click="bumpFont(-1)"
+                >
+                  A−
+                </button>
+                <span class="min-w-[2rem] text-center text-sm font-semibold text-fg">{{ editorFontPx }}</span>
+                <button
+                  type="button"
+                  class="cursor-pointer rounded px-1 py-0.5 text-sm text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-30"
+                  :disabled="editorFontPx >= EDITOR_FONT_MAX"
+                  @click="bumpFont(1)"
+                >
+                  A+
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="min-h-0 flex-1 p-2">
+            <VerilogEditor
+              v-if="activeFile"
+              :key="activeName"
+              :model-value="activeFile.content"
+              :font-size="editorFontPx"
+              height-class="h-full min-h-0"
+              @update:model-value="setActiveContent"
+            />
+            <p v-else class="p-4 text-sm text-muted">
+              No hay pestaña abierta. Tocá un archivo en el árbol de la izquierda.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -409,6 +600,13 @@ onBeforeUnmount(() => {
           accept=".bin,application/octet-stream"
           class="hidden"
           @change="onFile"
+        >
+        <input
+          ref="zipInput"
+          type="file"
+          accept=".zip,application/zip"
+          class="hidden"
+          @change="onZipFile"
         >
         <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">
           <div class="shrink-0 border-b border-border px-2 py-1.5">

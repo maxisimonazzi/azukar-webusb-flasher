@@ -1,3 +1,7 @@
+/** Azukar v2 lab. CLK12=49. LED0–7=37…45. BTN0_–BTN7_ active low. */
+
+import type { FpgaFile } from '@/fpga/files'
+
 export const BLINKY_TOP = 'azukar_lab'
 
 export const BLINKY_VERILOG = `// Azukar v2 — laboratorio de puertas + contador 4 bit.
@@ -42,3 +46,7 @@ module azukar_lab (
     assign LED7 = div[25];
 endmodule
 `
+
+export const FPGA_STARTER: FpgaFile[] = [
+  { name: 'azukar_lab.v', open: true, content: BLINKY_VERILOG },
+]
