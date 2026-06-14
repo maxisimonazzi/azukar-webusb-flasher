@@ -1,0 +1,10 @@
+.git
+**/.git
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/.DS_Store
+**/Thumbs.db
+**/*.log
+.idea
+.vscode

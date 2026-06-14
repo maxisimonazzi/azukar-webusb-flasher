@@ -2,11 +2,18 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+  FTDI_PID,
+  FTDI_VID,
   iceprogChipDeselect,
   iceprogChipSelect,
   iceprogReleaseBus,
   iceprogSramSelect,
 } from './iceprogPins.ts'
+
+test('VID/PID is FT2232H 0x0403/0x6010 (Azukar / Alhambra)', () => {
+  assert.equal(FTDI_VID, 0x0403)
+  assert.equal(FTDI_PID, 0x6010)
+})
 
 test('chip select drives CS and CRESET low as outputs', () => {
   assert.deepEqual(iceprogChipSelect(), { value: 0, direction: 0x93 })

@@ -23,10 +23,10 @@ export async function compileFpga(
     body: JSON.stringify({ top, files }),
   })
   if (res.status === 409) {
-    throw new Error('Ya hay una compilación en curso.')
+    throw new Error('COMPILE_BUSY')
   }
   if (res.status === 413) {
-    throw new Error('El Verilog es demasiado grande.')
+    throw new Error('COMPILE_TOO_LARGE')
   }
   if (!res.ok) {
     throw new Error(`Compile HTTP ${res.status}`)
