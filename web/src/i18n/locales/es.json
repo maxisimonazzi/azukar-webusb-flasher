@@ -4,7 +4,11 @@
     "themeLight": "Claro",
     "themeDark": "Oscuro",
     "localeEs": "ES",
-    "localeEn": "EN"
+    "localeEn": "EN",
+    "localeGroup": "Idioma",
+    "firefoxTitle": "Firefox no habla WebUSB",
+    "firefoxBody": "El laboratorio se abre igual: podés editar Verilog, compilar y bajar el .bin. Conectar el programador (canal A) y la UART (canal B) no funcionan en Firefox. Para grabar la placa usá Chrome o Edge en esta PC.",
+    "firefoxAccept": "Entendido"
   },
   "editor": {
     "lineCount": "{n} líneas",

@@ -36,6 +36,7 @@ import {
   type UartSession,
 } from '@/fpga/uart'
 import { verilogFilesFromZip, verilogFilesToZip } from '@/fpga/zipVerilog'
+import { isFirefox } from '@/lib/isFirefox'
 import {
   EDITOR_FONT_DEFAULT,
   EDITOR_FONT_MAX,
@@ -44,7 +45,7 @@ import {
 } from '@/prefs/editorFont'
 import { setLocalePreference } from '@/prefs/locale'
 import { beginThemeTransition, setThemePreference, themeRef } from '@/prefs/theme'
-import type { AppLocale, AppTheme } from '@/prefs/types'
+import { FIREFOX_NOTICE_KEY, type AppLocale, type AppTheme } from '@/prefs/types'
 
 type DumpDest = 'console' | 'bin' | 'hex'
 type UsbAction = 'connect' | 'disconnect' | 'program' | 'erase' | 'reset' | 'read' | 'eeprom'
@@ -66,6 +67,7 @@ const progressDone = ref(0)
 const progressTotal = ref(0)
 const progressLabel = ref('')
 const showNoBin = ref(false)
+const showFirefoxNotice = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const zipInput = ref<HTMLInputElement | null>(null)
 const logEl = ref<HTMLElement | null>(null)
@@ -110,6 +112,29 @@ function onTheme(next: AppTheme) {
   if (themeRef.value === next) return
   beginThemeTransition()
   setThemePreference(next)
+}
+
+function toggleTheme() {
+  onTheme(isDark.value ? 'light' : 'dark')
+}
+
+function localeBtnClass(code: AppLocale): string {
+  const active = locale.value === code
+  return [
+    'cursor-pointer rounded-md px-2 py-1 text-xs font-semibold tracking-wide transition-colors',
+    active
+      ? 'bg-primary/15 text-primary'
+      : 'text-muted hover:bg-surface-2 hover:text-fg',
+  ].join(' ')
+}
+
+function dismissFirefoxNotice() {
+  showFirefoxNotice.value = false
+  try {
+    localStorage.setItem(FIREFOX_NOTICE_KEY, '1')
+  } catch {
+    /* private mode */
+  }
 }
 
 function onLocale(next: AppLocale) {
@@ -556,6 +581,13 @@ onMounted(() => {
   stopConnectionWatch = onMpsseConnectionChange((open) => {
     boardConnected.value = open
   })
+  try {
+    if (isFirefox() && localStorage.getItem(FIREFOX_NOTICE_KEY) !== '1') {
+      showFirefoxNotice.value = true
+    }
+  } catch {
+    if (isFirefox()) showFirefoxNotice.value = true
+  }
 })
 
 onBeforeUnmount(() => {
@@ -569,40 +601,69 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex h-dvh min-h-0 flex-col">
+  <div class="flex h-dvh min-h-0 flex-col overflow-hidden">
     <header class="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
       <div class="flex items-center gap-3">
         <img src="/favicon.svg" alt="" class="h-7 w-7" width="28" height="28">
         <h1 class="text-sm font-semibold tracking-wide text-fg">{{ t('app.title') }}</h1>
       </div>
       <div class="flex items-center gap-2">
+        <div
+          class="inline-flex items-center gap-0.5 rounded-lg border border-border bg-surface-2/60 p-0.5"
+          role="group"
+          :aria-label="t('app.localeGroup')"
+        >
+          <button
+            type="button"
+            :class="localeBtnClass('es')"
+            :aria-pressed="locale === 'es'"
+            @click="onLocale('es')"
+          >
+            {{ t('app.localeEs') }}
+          </button>
+          <button
+            type="button"
+            :class="localeBtnClass('en')"
+            :aria-pressed="locale === 'en'"
+            @click="onLocale('en')"
+          >
+            {{ t('app.localeEn') }}
+          </button>
+        </div>
         <button
           type="button"
-          class="rounded-lg border px-2 py-1.5 text-xs font-semibold"
-          :class="locale === 'es' ? 'border-primary bg-accent-soft text-fg' : 'border-border bg-surface-2 text-muted hover:text-fg'"
-          @click="onLocale('es')"
+          class="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-primary transition-colors hover:bg-surface-2"
+          :aria-label="isDark ? t('app.themeLight') : t('app.themeDark')"
+          :title="isDark ? t('app.themeLight') : t('app.themeDark')"
+          @click="toggleTheme"
         >
-          {{ t('app.localeEs') }}
-        </button>
-        <button
-          type="button"
-          class="rounded-lg border px-2 py-1.5 text-xs font-semibold"
-          :class="locale === 'en' ? 'border-primary bg-accent-soft text-fg' : 'border-border bg-surface-2 text-muted hover:text-fg'"
-          @click="onLocale('en')"
-        >
-          {{ t('app.localeEn') }}
-        </button>
-        <button
-          type="button"
-          class="rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-xs font-semibold text-fg hover:bg-surface-3"
-          @click="onTheme(isDark ? 'light' : 'dark')"
-        >
-          {{ isDark ? t('app.themeLight') : t('app.themeDark') }}
+          <svg
+            v-if="!isDark"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            class="h-5 w-5"
+            aria-hidden="true"
+          >
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+          </svg>
+          <svg
+            v-else
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            class="h-5 w-5"
+            aria-hidden="true"
+          >
+            <path
+              d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zm0-16a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1zm0 18a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0v-1a1 1 0 0 1 1-1zm10-8a1 1 0 0 1-1 1h-1a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1zM4 12a1 1 0 0 1-1 1H2a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1zm14.95 6.364a1 1 0 0 1 0 1.414l-.707.707a1 1 0 1 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0zM6.464 5.05a1 1 0 0 1 0 1.414l-.707.707A1 1 0 0 1 4.343 5.757l.707-.707a1 1 0 0 1 1.414 0zm12.728 0a1 1 0 0 1-1.414 0l-.707-.707a1 1 0 1 1 1.414-1.414l.707.707a1 1 0 0 1 0 1.414zM6.464 18.95a1 1 0 0 1-1.414 0l-.707-.707a1 1 0 1 1 1.414-1.414l.707.707a1 1 0 0 1 0 1.414z"
+            />
+          </svg>
         </button>
       </div>
     </header>
 
-    <div class="flex min-h-0 flex-1 gap-4 px-4 py-3">
+    <div class="flex min-h-0 flex-1 gap-4 overflow-hidden px-4 py-3">
       <section class="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-border bg-surface">
         <aside class="flex w-[11.5rem] shrink-0 flex-col overflow-y-auto border-r border-border">
           <div class="px-2 pt-3 pb-1">
@@ -960,6 +1021,31 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
+    <footer class="shrink-0 border-t border-border px-4 py-1.5 text-center text-[0.6875rem] leading-relaxed text-muted">
+      <span>Maximiliano Martin Simonazzi</span>
+      <span class="mx-1.5 text-subtle">·</span>
+      <a
+        class="text-muted no-underline hover:text-fg hover:underline"
+        href="https://www.maxisimonazzi.com.ar"
+        target="_blank"
+        rel="noopener noreferrer"
+      >www.maxisimonazzi.com.ar</a>
+      <span class="mx-1.5 text-subtle">·</span>
+      <a
+        class="text-muted no-underline hover:text-fg hover:underline"
+        href="https://github.com/maxisimonazzi"
+        target="_blank"
+        rel="noopener noreferrer"
+      >github.com/maxisimonazzi</a>
+      <span class="mx-1.5 text-subtle">·</span>
+      <a
+        class="text-muted no-underline hover:text-fg hover:underline"
+        href="https://www.linkedin.com/in/maxisimonazzi/"
+        target="_blank"
+        rel="noopener noreferrer"
+      >linkedin.com/in/maxisimonazzi</a>
+    </footer>
+
     <div
       v-if="showNoBin"
       class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
@@ -970,6 +1056,19 @@ onBeforeUnmount(() => {
           <AppButton @click="showNoBin = false; void onCompile()">{{ t('fpga.compile') }}</AppButton>
           <AppButton variant="secondary" @click="onChooseUpload">{{ t('fpga.uploadBin') }}</AppButton>
           <AppButton variant="outline" @click="showNoBin = false">{{ t('fpga.cancel') }}</AppButton>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="showFirefoxNotice"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    >
+      <div class="max-w-md rounded-xl border border-border bg-surface p-5 shadow-lg">
+        <p class="text-sm font-semibold text-fg">{{ t('app.firefoxTitle') }}</p>
+        <p class="mt-2 text-sm leading-relaxed text-muted">{{ t('app.firefoxBody') }}</p>
+        <div class="mt-4">
+          <AppButton @click="dismissFirefoxNotice">{{ t('app.firefoxAccept') }}</AppButton>
         </div>
       </div>
     </div>

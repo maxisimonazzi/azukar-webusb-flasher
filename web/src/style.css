@@ -18,21 +18,22 @@
 :root {
   color-scheme: light;
 
-  --bg: oklch(0.97 0.012 75);
-  --surface: oklch(0.995 0.006 80);
-  --surface-2: oklch(0.95 0.014 75);
-  --surface-3: oklch(0.91 0.018 70);
-  --panel: oklch(0.995 0.006 80);
-  --border: oklch(0.88 0.02 70);
-  --border-strong: oklch(0.8 0.03 65);
+  /* Claros: el techo es oklch(0.97 0.012 75). Nada de blanco 0.99 que quema. */
+  --bg: oklch(0.94 0.014 75);
+  --surface: oklch(0.97 0.012 75);
+  --surface-2: oklch(0.93 0.015 75);
+  --surface-3: oklch(0.89 0.018 70);
+  --panel: oklch(0.97 0.012 75);
+  --border: oklch(0.84 0.022 70);
+  --border-strong: oklch(0.76 0.03 65);
   --fg: oklch(0.24 0.03 55);
-  --muted: oklch(0.48 0.025 55);
-  --subtle: oklch(0.55 0.02 60);
+  --muted: oklch(0.45 0.025 55);
+  --subtle: oklch(0.52 0.02 60);
   --primary: oklch(0.52 0.1 55);
   --primary-bright: oklch(0.58 0.11 52);
-  --primary-fg: oklch(0.99 0.01 85);
+  --primary-fg: oklch(0.97 0.012 75);
   --accent: oklch(0.52 0.1 55);
-  --accent-soft: oklch(0.94 0.03 75);
+  --accent-soft: oklch(0.91 0.03 75);
   --success: oklch(0.52 0.11 150);
   --warning: oklch(0.7 0.14 70);
   --error: oklch(0.55 0.18 25);
@@ -119,6 +120,8 @@
   html {
     @apply antialiased;
     font-size: 16px;
+    height: 100%;
+    overflow: hidden;
   }
 
   html.theme-transition,
@@ -134,6 +137,11 @@
   }
 
   body {
-    @apply min-h-dvh bg-bg font-sans text-base text-fg;
+    @apply h-full overflow-hidden bg-bg font-sans text-base text-fg;
+  }
+
+  #app {
+    height: 100dvh;
+    overflow: hidden;
   }
 }

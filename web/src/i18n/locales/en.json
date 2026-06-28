@@ -4,7 +4,11 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "localeEs": "ES",
-    "localeEn": "EN"
+    "localeEn": "EN",
+    "localeGroup": "Language",
+    "firefoxTitle": "Firefox has no WebUSB",
+    "firefoxBody": "The lab still opens: you can edit Verilog, compile, and download the .bin. Connecting the programmer (channel A) and UART (channel B) does not work in Firefox. To flash the board, use Chrome or Edge on this PC.",
+    "firefoxAccept": "Got it"
   },
   "editor": {
     "lineCount": "{n} lines",

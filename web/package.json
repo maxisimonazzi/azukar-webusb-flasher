@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "test": "node --experimental-strip-types --test src/lib/verilogEditor.test.ts src/fpga/flashPlan.test.ts src/fpga/iceprogPins.test.ts src/fpga/flashDump.test.ts src/fpga/ftdiUsb.test.ts src/fpga/files.test.ts src/fpga/zipVerilog.test.ts src/fpga/uart.test.ts src/fpga/starter.test.ts"
+    "test": "node --experimental-strip-types --test src/lib/verilogEditor.test.ts src/lib/isFirefox.test.ts src/fpga/flashPlan.test.ts src/fpga/iceprogPins.test.ts src/fpga/flashDump.test.ts src/fpga/ftdiUsb.test.ts src/fpga/files.test.ts src/fpga/zipVerilog.test.ts src/fpga/uart.test.ts src/fpga/starter.test.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",

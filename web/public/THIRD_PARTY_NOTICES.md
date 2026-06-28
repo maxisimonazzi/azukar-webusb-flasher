@@ -10,5 +10,8 @@ Fonts and FPGA tools bundled or used at runtime.
 | nextpnr-ice40 (Debian) | ISC | Place & route iCE40 |
 | Project IceStorm / `icepack` (`fpga-icestorm`) | ISC | Pack `.asc` → `.bin` |
 | Vue, Vite, Tailwind, CodeMirror | MIT | SPA |
+| Caddy (opcional, VPS) | Apache-2.0 | Reverse proxy + Let’s Encrypt |
 
 OFL copies: `web/public/fonts/`.
+
+This app: MIT (`LICENSE`). `boards/azukar-v2/pins.pcf`: CERN OHL-P.

@@ -1,0 +1,30 @@
+# VPS: HTTPS automático con Caddy delante de la SPA (nginx se queda adentro).
+#   SITE_ADDRESS=flasher.ejemplo.com docker compose -f docker-compose.yml -f docker-compose.caddy.yml up --build -d
+#
+# En esta PC no lo uses: el 80/443 del host y Let's Encrypt no aplican a localhost.
+
+services:
+  web:
+    ports: !override []
+    expose:
+      - "80"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS to your public domain}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  caddy_data:
+  caddy_config:
