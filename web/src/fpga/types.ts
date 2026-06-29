@@ -14,6 +14,13 @@ export type ProgramStats = {
   sectors: number
 }
 
+export type SramProgramStats = {
+  bytes: number
+  cdone: 0 | 1
+  totalMs: number
+  pinsAfterSelect: string
+}
+
 /** FT2232H MPSSE + SPI flash. See `mpsse.ts`. */
 export interface Ice40Mpsse {
   connect(opts?: { forcePicker?: boolean }): Promise<USBDevice>

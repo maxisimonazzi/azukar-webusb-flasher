@@ -22,6 +22,7 @@ import {
   eraseIce40Flash,
   onMpsseConnectionChange,
   programIce40Flash,
+  programIce40Sram,
   readFtdiConfigEeprom,
   readIce40Flash,
   resetIce40FromFlash,
@@ -35,8 +36,9 @@ import {
   openUartSession,
   type UartSession,
 } from '@/fpga/uart'
+import { classifyUsbError, usbBannerKey } from '@/fpga/usbErrors'
 import { verilogFilesFromZip, verilogFilesToZip } from '@/fpga/zipVerilog'
-import { isFirefox } from '@/lib/isFirefox'
+import { isFirefox, WEBSERIAL_FIREFOX_ADDON_URL } from '@/lib/isFirefox'
 import {
   EDITOR_FONT_DEFAULT,
   EDITOR_FONT_MAX,
@@ -45,10 +47,19 @@ import {
 } from '@/prefs/editorFont'
 import { setLocalePreference } from '@/prefs/locale'
 import { beginThemeTransition, setThemePreference, themeRef } from '@/prefs/theme'
-import { FIREFOX_NOTICE_KEY, type AppLocale, type AppTheme } from '@/prefs/types'
+import type { AppLocale, AppTheme } from '@/prefs/types'
 
 type DumpDest = 'console' | 'bin' | 'hex'
-type UsbAction = 'connect' | 'disconnect' | 'program' | 'erase' | 'reset' | 'read' | 'eeprom'
+type UsbAction =
+  | 'connect'
+  | 'disconnect'
+  | 'program'
+  | 'sram'
+  | 'erase'
+  | 'reset'
+  | 'read'
+  | 'eeprom'
+type UploadThen = 'flash' | 'sram'
 
 const { t, locale } = useI18n()
 
@@ -59,10 +70,11 @@ const top = ref(BLINKY_TOP)
 const bin = shallowRef<Uint8Array | null>(null)
 const logText = ref('')
 const error = ref('')
+const errorLink = ref<string | null>(null)
 const busyCompile = ref(false)
 const usbAction = ref<UsbAction | null>(null)
 const boardConnected = ref(false)
-const uploadThen = ref<'flash' | null>(null)
+const uploadThen = ref<UploadThen | null>(null)
 const progressDone = ref(0)
 const progressTotal = ref(0)
 const progressLabel = ref('')
@@ -94,7 +106,10 @@ const progressPct = computed(() => {
   return Math.min(100, Math.round((progressDone.value / progressTotal.value) * 100))
 })
 const showProgress = computed(
-  () => usbAction.value === 'program' || usbAction.value === 'read',
+  () =>
+    usbAction.value === 'program' ||
+    usbAction.value === 'sram' ||
+    usbAction.value === 'read',
 )
 const openTabs = computed(() => visibleFpgaTabs(files.value))
 const activeFile = computed(
@@ -107,6 +122,25 @@ const lineCount = computed(() => {
 })
 
 const lineCountLabel = computed(() => t('editor.lineCount', { n: lineCount.value }))
+const webserialAddonUrl = WEBSERIAL_FIREFOX_ADDON_URL
+
+function clearBanner() {
+  error.value = ''
+  errorLink.value = null
+}
+
+function setBanner(msg: string, link: string | null = null) {
+  error.value = msg
+  errorLink.value = link
+}
+
+function setNeedWebSerialBanner() {
+  if (isFirefox()) {
+    setBanner(t('fpga.needWebSerialFirefox'), WEBSERIAL_FIREFOX_ADDON_URL)
+    return
+  }
+  setBanner(t('fpga.needWebSerial'))
+}
 
 function onTheme(next: AppTheme) {
   if (themeRef.value === next) return
@@ -130,11 +164,6 @@ function localeBtnClass(code: AppLocale): string {
 
 function dismissFirefoxNotice() {
   showFirefoxNotice.value = false
-  try {
-    localStorage.setItem(FIREFOX_NOTICE_KEY, '1')
-  } catch {
-    /* private mode */
-  }
 }
 
 function onLocale(next: AppLocale) {
@@ -201,14 +230,14 @@ async function onZipFile(ev: Event) {
   try {
     const imported = await verilogFilesFromZip(await file.arrayBuffer())
     if (imported.length === 0) {
-      error.value = t('fpga.zipNoVerilog')
+      setBanner(t('fpga.zipNoVerilog'))
       return
     }
     files.value = imported.map((f) => ({ ...f, open: true }))
     activeName.value = files.value[0]?.name ?? ''
     appendLog(t('fpga.zipImported', { n: imported.length, name: file.name }))
   } catch (err) {
-    error.value = err instanceof Error ? err.message : t('fpga.zipReadFailed')
+    setBanner(err instanceof Error ? err.message : t('fpga.zipReadFailed'))
   }
 }
 
@@ -229,9 +258,9 @@ function clearUart() {
 }
 
 async function onUartConnect() {
-  error.value = ''
+  clearBanner()
   if (!hasWebSerial()) {
-    error.value = t('fpga.needWebSerial')
+    setNeedWebSerialBanner()
     return
   }
   uartBusy.value = true
@@ -248,7 +277,11 @@ async function onUartConnect() {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('No port selected') || msg.toLowerCase().includes('cancel')) return
-    error.value = uartErrorMessage(err)
+    if (msg === 'NEED_WEB_SERIAL') {
+      setNeedWebSerialBanner()
+      return
+    }
+    setBanner(uartErrorMessage(err))
   } finally {
     uartBusy.value = false
   }
@@ -341,6 +374,8 @@ function progressPhrase(phase: string): string {
     case 'flash':
     case 'program':
       return t('fpga.flashing')
+    case 'sram':
+      return t('fpga.sramming')
     case 'read':
       return t('fpga.reading')
     default:
@@ -349,7 +384,7 @@ function progressPhrase(phase: string): string {
 }
 
 async function onCompile() {
-  error.value = ''
+  clearBanner()
   showNoBin.value = false
   if (busyCompile.value) return
   busyCompile.value = true
@@ -364,10 +399,10 @@ async function onCompile() {
       setBin(result.bin)
       appendLog(t('fpga.binReady', { n: result.bin.length }))
     } else if (result.status !== 'success') {
-      error.value = t('fpga.compileNoBin')
+      setBanner(t('fpga.compileNoBin'))
     }
   } catch (err) {
-    error.value = compileErrorMessage(err)
+    setBanner(compileErrorMessage(err))
   } finally {
     busyCompile.value = false
   }
@@ -398,17 +433,19 @@ function closeDetails(ev: Event) {
 
 function needWebUsb(): boolean {
   if (navigator.usb) return true
-  error.value = t('fpga.needWebUsb')
+  setBanner(t('fpga.needWebUsb'))
   return false
 }
 
 function usbCatch(label: string, err: unknown) {
   const msg = err instanceof Error ? err.message : String(err)
-  if (msg.includes('No device selected') || msg.toLowerCase().includes('cancel')) {
+  const kind = classifyUsbError(msg)
+  const key = usbBannerKey(kind)
+  if (key == null) {
     appendLog(t('fpga.noUsbDevice'))
     return
   }
-  error.value = msg
+  setBanner(t(key))
   appendLog(t('fpga.usbFailed', { label, msg }))
 }
 
@@ -445,9 +482,18 @@ async function doProgram() {
   )
 }
 
+async function doSram() {
+  if (!bin.value) return
+  showNoBin.value = false
+  await runUsb('sram', async () => {
+    const stats = await programIce40Sram(bin.value!, appendLog, onProgress)
+    if (!stats.cdone) setBanner(t('fpga.sramCdoneLow'))
+  })
+}
+
 function onFlashCompiled(ev?: Event) {
   if (ev) closeDetails(ev)
-  error.value = ''
+  clearBanner()
   if (!bin.value) {
     showNoBin.value = true
     return
@@ -455,15 +501,32 @@ function onFlashCompiled(ev?: Event) {
   void doProgram()
 }
 
+function onSramCompiled(ev?: Event) {
+  if (ev) closeDetails(ev)
+  clearBanner()
+  if (!bin.value) {
+    showNoBin.value = true
+    return
+  }
+  void doSram()
+}
+
 function onFlashUpload(ev: Event) {
   closeDetails(ev)
-  error.value = ''
+  clearBanner()
   uploadThen.value = 'flash'
   fileInput.value?.click()
 }
 
+function onSramUpload(ev: Event) {
+  closeDetails(ev)
+  clearBanner()
+  uploadThen.value = 'sram'
+  fileInput.value?.click()
+}
+
 async function onReset() {
-  error.value = ''
+  clearBanner()
   clearUart()
   await runUsb('reset', async () => {
     appendLog(t('fpga.resetLog'))
@@ -472,7 +535,7 @@ async function onReset() {
 }
 
 async function onErase() {
-  error.value = ''
+  clearBanner()
   if (!window.confirm(t('fpga.eraseConfirm'))) {
     return
   }
@@ -481,7 +544,7 @@ async function onErase() {
 
 async function onReadFlash(dest: DumpDest, ev: Event) {
   closeDetails(ev)
-  error.value = ''
+  clearBanner()
   await runUsb('read', async () => {
     const dump = await readIce40Flash(appendLog, onProgress)
     if (dest === 'console') {
@@ -512,14 +575,14 @@ async function onReadFlash(dest: DumpDest, ev: Event) {
 }
 
 async function onConnect() {
-  error.value = ''
+  clearBanner()
   appendLog(t('fpga.connectPicker'))
   await runUsb('connect', () => connectMpsse(appendLog, { forcePicker: true }))
 }
 
 async function onReadEeprom(dest: DumpDest, ev: Event) {
   closeDetails(ev)
-  error.value = ''
+  clearBanner()
   await runUsb('eeprom', async () => {
     const raw = await readFtdiConfigEeprom(appendLog)
     if (dest === 'console') return
@@ -542,7 +605,7 @@ function onDownloadBin() {
 }
 
 async function onDisconnect() {
-  error.value = ''
+  clearBanner()
   await runUsb('disconnect', () => disconnectMpsse(appendLog))
 }
 
@@ -573,7 +636,20 @@ function onFile(ev: Event) {
     }
     const nextAction = uploadThen.value
     uploadThen.value = null
-    if (nextAction === 'flash') void doProgram()
+    switch (nextAction) {
+      case 'flash':
+        void doProgram()
+        break
+      case 'sram':
+        void doSram()
+        break
+      case null:
+        break
+      default: {
+        const _exhaustive: never = nextAction
+        return _exhaustive
+      }
+    }
   })
 }
 
@@ -581,13 +657,7 @@ onMounted(() => {
   stopConnectionWatch = onMpsseConnectionChange((open) => {
     boardConnected.value = open
   })
-  try {
-    if (isFirefox() && localStorage.getItem(FIREFOX_NOTICE_KEY) !== '1') {
-      showFirefoxNotice.value = true
-    }
-  } catch {
-    if (isFirefox()) showFirefoxNotice.value = true
-  }
+  if (isFirefox()) showFirefoxNotice.value = true
 })
 
 onBeforeUnmount(() => {
@@ -818,7 +888,6 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="flex min-h-0 min-w-0 w-[calc(35%+50px)] shrink-0 flex-col gap-2">
-        <p v-if="error" class="shrink-0 text-sm text-error">{{ error }}</p>
         <input
           ref="fileInput"
           type="file"
@@ -872,7 +941,7 @@ onBeforeUnmount(() => {
                   {{ t('fpga.clearConsole') }}
                 </button>
               </div>
-              <div class="mt-1.5 flex flex-nowrap items-center gap-1.5">
+              <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <AppButton
                   size="sm"
                   :class="slimBtn"
@@ -912,6 +981,31 @@ onBeforeUnmount(() => {
                       @click="onFlashUpload"
                     >
                       {{ t('fpga.flashUpload') }}
+                    </button>
+                  </div>
+                </details>
+                <details class="relative">
+                  <summary
+                    class="inline-flex h-[25px] cursor-pointer list-none items-center rounded-md border border-border-strong bg-transparent px-2 text-xs font-semibold text-fg hover:bg-surface-2 [&::-webkit-details-marker]:hidden"
+                    :class="usbBusy || uiLocked ? 'pointer-events-none opacity-60' : ''"
+                    :title="t('fpga.sramHint')"
+                  >
+                    {{ usbAction === 'sram' ? t('fpga.sramming') : t('fpga.sram') }}
+                  </summary>
+                  <div class="absolute z-20 mt-1 min-w-[15rem] rounded-lg border border-border bg-surface py-1 shadow-lg">
+                    <button
+                      type="button"
+                      class="block w-full px-3 py-2 text-left text-sm text-fg hover:bg-surface-2"
+                      @click="onSramCompiled"
+                    >
+                      {{ t('fpga.sramCompiled') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="block w-full px-3 py-2 text-left text-sm text-fg hover:bg-surface-2"
+                      @click="onSramUpload"
+                    >
+                      {{ t('fpga.sramUpload') }}
                     </button>
                   </div>
                 </details>
@@ -959,7 +1053,31 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
-            <div ref="logEl" class="min-h-0 flex-1 overflow-y-auto">
+            <div ref="logEl" class="relative min-h-0 flex-1 overflow-y-auto">
+              <div
+                v-if="error"
+                role="alert"
+                class="sticky top-0 z-10 border-b border-error/30 bg-surface/95 px-3 py-2 shadow-sm"
+              >
+                <div class="flex items-start gap-2">
+                  <p class="min-w-0 flex-1 text-sm leading-snug text-error">{{ error }}</p>
+                  <button
+                    type="button"
+                    class="shrink-0 text-sm leading-none text-muted hover:text-fg"
+                    :aria-label="t('fpga.dismissError')"
+                    @click="clearBanner"
+                  >
+                    ×
+                  </button>
+                </div>
+                <a
+                  v-if="errorLink"
+                  class="mt-1 block break-all text-xs text-primary underline"
+                  :href="errorLink"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >{{ errorLink }}</a>
+              </div>
               <pre class="p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-fg">{{
                 logText || t('fpga.logEmpty')
               }}</pre>
@@ -1067,6 +1185,14 @@ onBeforeUnmount(() => {
       <div class="max-w-md rounded-xl border border-border bg-surface p-5 shadow-lg">
         <p class="text-sm font-semibold text-fg">{{ t('app.firefoxTitle') }}</p>
         <p class="mt-2 text-sm leading-relaxed text-muted">{{ t('app.firefoxBody') }}</p>
+        <p class="mt-3 text-sm leading-relaxed text-muted">{{ t('app.firefoxSerial') }}</p>
+        <a
+          class="mt-2 inline-block text-sm text-primary underline"
+          :href="webserialAddonUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+        >{{ t('app.firefoxSerialLink') }}</a>
+        <p class="mt-1 break-all text-xs text-muted">{{ webserialAddonUrl }}</p>
         <div class="mt-4">
           <AppButton @click="dismissFirefoxNotice">{{ t('app.firefoxAccept') }}</AppButton>
         </div>

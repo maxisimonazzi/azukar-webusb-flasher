@@ -8,10 +8,23 @@ import {
   ice40FlashPlan,
   trimIce40Image,
 } from '@/fpga/flashPlan'
+import {
+  formatAdbusPins,
+  iceprogSramReleaseCs,
+  iceprogSramSelect,
+} from '@/fpga/iceprogPins'
 import { mpsse } from '@/fpga/mpsse'
-import type { ProgramLog, ProgramProgress, ProgramStats } from '@/fpga/types'
+import type {
+  ProgramLog,
+  ProgramProgress,
+  ProgramStats,
+  SramProgramStats,
+} from '@/fpga/types'
 
 const FLASH_READ_CHUNK = 64
+const SRAM_SPI_CHUNK = 4096
+const SRAM_DUMMY_FF = 7
+const SRAM_EXTRA_DUMMY_FF = 16
 
 type ConnectionListener = (connected: boolean) => void
 const listeners = new Set<ConnectionListener>()
@@ -285,6 +298,149 @@ export async function programIce40Flash(
       `[mpsse] timings connect=${stats.connectMs}ms erase=${stats.eraseMs}ms program=${stats.programMs}ms cfg=${stats.configureMs}ms total=${stats.totalMs}ms`,
     )
     return stats
+  } catch (err) {
+    await closeMpsseSession()
+    throw err
+  }
+}
+
+async function pollCdone(device: USBDevice, tries = 20, gapMs = 20): Promise<0 | 1> {
+  let cdone = await mpsse.fpgaGetCdone(device)
+  for (let i = 0; i < tries && !cdone; i++) {
+    await sleep(gapMs)
+    cdone = await mpsse.fpgaGetCdone(device)
+  }
+  return cdone
+}
+
+async function logAdbus(device: USBDevice, log: ProgramLog, label: string): Promise<string> {
+  const pins = formatAdbusPins(await mpsse.readPins(device))
+  log(`[mpsse] SRAM ${label} ${pins}`)
+  return pins
+}
+
+/**
+ * iceprog -S: clock the icepack image into CRAM as SPI slave.
+ * Does not write the NOR. A later Reset reloads flash.
+ *
+ * Shared ADBUS4 = flash /CS = FPGA SPI_SS_B, so the W25X40 also sees the
+ * shift. We put it in 0xB9 deep power-down first; that is the software we
+ * can do without cutting copper. No flash-boot fallback (that lies).
+ */
+export async function programIce40Sram(
+  bin: Uint8Array,
+  log: ProgramLog,
+  onProgress?: ProgramProgress,
+): Promise<SramProgramStats> {
+  if (bin.length === 0) {
+    throw new Error('empty bitstream')
+  }
+  const payload = trimIce40Image(bin)
+  if (payload.length === 0) {
+    throw new Error('ese .bin está vacío o es un dump de flash borrada (todo 0xFF)')
+  }
+  if (payload.length !== bin.length) {
+    log(
+      `[mpsse] SRAM recorté ${bin.length} → ${payload.length} B (0xFF al final)`,
+    )
+  }
+
+  const t0 = now()
+  const device = await openMpsse(log)
+
+  try {
+    log(
+      `[mpsse] SRAM slave ${payload.length} B — iceprog -S (no toca la flash)`,
+    )
+
+    await step('SRAM CRESET=0 (FPGA en reset, flash idle)', log, () =>
+      mpsse.fpgaResetAssert(device),
+    )
+    await sleep(2)
+    await mpsse.flashReleasePowerDown(device)
+    const id = await mpsse.flashReadId(device)
+    log(`[mpsse] SRAM JEDEC ${hexBytes(id)} — despierto la NOR para mandarla a sleep`)
+    await mpsse.flashPowerDown(device)
+    log(
+      '[mpsse] SRAM flash 0xB9 deep power-down — misma CS que SPI_SS_B; la NOR no debería interpretar el bitstream',
+    )
+    await sleep(1)
+
+    await step('SRAM sramReset CS+CRESET=0', log, () => mpsse.sramReset(device))
+    await sleep(2)
+    await logAdbus(device, log, 'tras sramReset')
+
+    await step('SRAM sramSelect CS=0 CRESET=1 (flanco slave)', log, () =>
+      mpsse.sramSelect(device),
+    )
+    await sleep(5)
+    const pinsAfterSelect = await logAdbus(
+      device,
+      log,
+      'tras sramSelect (esperaba CS=0 CRESET=1 CDONE=0)',
+    )
+
+    log(`[mpsse] SRAM shifting ${payload.length} bytes`)
+    for (let off = 0; off < payload.length; off += SRAM_SPI_CHUNK) {
+      const chunk = payload.subarray(
+        off,
+        Math.min(off + SRAM_SPI_CHUNK, payload.length),
+      )
+      await mpsse.sramSend(device, chunk)
+      const done = off + chunk.length
+      onProgress?.(done, payload.length, 'sram')
+      if (off === 0 || done === payload.length || done % (SRAM_SPI_CHUNK * 8) === 0) {
+        log(`[mpsse] SRAM ${done}/${payload.length}`)
+      }
+    }
+
+    await mpsse.sramSend(device, new Uint8Array(SRAM_DUMMY_FF).fill(0xff))
+    await mpsse.sramDummyClocks(device)
+    log(
+      `[mpsse] SRAM dummy ${SRAM_DUMMY_FF}×0xFF + 49 clocks (SI=1, iceprog 6 B + 1 bit)`,
+    )
+
+    let cdone = await pollCdone(device)
+    if (!cdone) {
+      log('[mpsse] SRAM CDONE todavía 0 — más dummy y reintento')
+      await mpsse.sramSend(device, new Uint8Array(SRAM_EXTRA_DUMMY_FF).fill(0xff))
+      await mpsse.sramDummyClocks(device)
+      cdone = await pollCdone(device)
+    }
+
+    await logAdbus(device, log, 'tras dummy')
+    const donePins = iceprogSramReleaseCs()
+    await step('SRAM suelto CS (CRESET sigue en 1, sin boot flash)', log, () =>
+      mpsse.setGpio(device, donePins.value, donePins.direction),
+    )
+    await sleep(2)
+    cdone = await mpsse.fpgaGetCdone(device)
+
+    const wake = iceprogSramSelect()
+    const idle = iceprogSramReleaseCs()
+    await mpsse.setGpio(device, wake.value, wake.direction)
+    await mpsse.sramSend(device, new Uint8Array([0xab]))
+    await mpsse.setGpio(device, idle.value, idle.direction)
+    log('[mpsse] SRAM 0xAB — despierto la NOR sin pulsar CRESET (Reset/flash siguen andando)')
+    await sleep(1)
+
+    const t1 = now()
+    if (cdone) {
+      log(
+        `[mpsse] SRAM CDONE=1 — corre desde CRAM (${payload.length} B, ${Math.round(t1 - t0)}ms). Reset o un corte de luz recarga la flash, no este diseño.`,
+      )
+    } else {
+      log(
+        `[mpsse] SRAM CDONE=0 — el slave no configuró (${payload.length} B, ${Math.round(t1 - t0)}ms). En Azukar FTDI CS, flash /CS y SPI_SS_B son el mismo net (ADBUS4). No hago Reset: eso recargaría la flash y parecería que SRAM anduvo.`,
+      )
+    }
+
+    return {
+      bytes: payload.length,
+      cdone,
+      totalMs: Math.round(t1 - t0),
+      pinsAfterSelect,
+    }
   } catch (err) {
     await closeMpsseSession()
     throw err

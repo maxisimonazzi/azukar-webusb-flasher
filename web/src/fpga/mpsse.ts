@@ -123,7 +123,9 @@ function csDeassert(device: USBDevice): Promise<void> {
   return applyGpio(device, iceprogChipDeselect())
 }
 
-async function spiWrite(device: USBDevice, payload: Uint8Array): Promise<void> {
+const SPI_WRITE_CHUNK = 4096
+
+async function spiWriteChunk(device: USBDevice, payload: Uint8Array): Promise<void> {
   if (payload.length === 0) return
   const n = payload.length - 1
   const header = new Uint8Array([MPSSE_WRITE_NEG, n & 0xff, (n >> 8) & 0xff])
@@ -131,6 +133,16 @@ async function spiWrite(device: USBDevice, payload: Uint8Array): Promise<void> {
   frame.set(header, 0)
   frame.set(payload, header.length)
   await device.transferOut(OUT_EP, frame)
+}
+
+/** MPSSE 0x11 length is 16-bit: one command cannot clock more than 65536 B. */
+async function spiWrite(device: USBDevice, payload: Uint8Array): Promise<void> {
+  for (let off = 0; off < payload.length; off += SPI_WRITE_CHUNK) {
+    await spiWriteChunk(
+      device,
+      payload.subarray(off, Math.min(off + SPI_WRITE_CHUNK, payload.length)),
+    )
+  }
 }
 
 async function spiWriteRead(
