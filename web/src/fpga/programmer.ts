@@ -475,10 +475,43 @@ export async function eraseIce40Flash(log: ProgramLog): Promise<void> {
       mpsse.fpgaResetAssert(device),
     )
     await mpsse.flashReleasePowerDown(device)
-    log('[mpsse] chip erase 0xC7 — mpsse.flashChipErase (puede tardar)')
+    log('[mpsse] chip erase 0xC7 — espero WIP=0 (puede tardar varios segundos)')
     await mpsse.flashWriteEnable(device)
     await mpsse.flashChipErase(device)
-    await mpsse.flashWait(device)
+    await sleep(50)
+    const tErase = now()
+    let sawBusy = false
+    let lastSpeak = -1000
+    const maxMs = 40_000
+    while (now() - tErase < maxMs) {
+      const status = await mpsse.flashReadStatus(device)
+      const wip = (status & 0x01) !== 0
+      if (wip) sawBusy = true
+      const elapsed = now() - tErase
+      if (elapsed - lastSpeak >= 1000) {
+        log(
+          `[mpsse] borrando… ${(elapsed / 1000).toFixed(1)} s  WIP=${wip ? 1 : 0}`,
+        )
+        lastSpeak = elapsed
+      }
+      if (!wip && sawBusy) break
+      if (!wip && !sawBusy && elapsed >= 2000) break
+      await sleep(100)
+    }
+    if (now() - tErase >= maxMs) {
+      throw new Error('SPI flash timed out waiting for WIP=0')
+    }
+    const ms = Math.round(now() - tErase)
+    log(
+      `[mpsse] WIP=0 en ${ms}ms${sawBusy ? '' : ' (no vi WIP=1; confirmo leyendo)'}`,
+    )
+    const probe = await mpsse.flashRead(device, 0, 64)
+    if (probe.some((b) => b !== 0xff)) {
+      throw new Error(
+        'chip erase terminó el WIP pero @0x0 no está en 0xFF; el borrado no se confirmó',
+      )
+    }
+    log(`[mpsse] flash borrada: 64 B @ 0x0 = 0xFF (${ms}ms)`)
     await step('CS+CRESET high-Z — mpsse.fpgaResetDeassert', log, () =>
       mpsse.fpgaResetDeassert(device),
     )

@@ -1,9 +1,22 @@
 export type FpgaFile = { name: string; content: string; open: boolean }
 
 export const FPGA_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*\.v$/
+export const FPGA_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 export function isFpgaFilename(name: string): boolean {
   return FPGA_NAME_RE.test(name)
+}
+
+export function normalizeFpgaFilename(raw: string): string | null {
+  const trimmed = raw.trim()
+  const withV = trimmed.toLowerCase().endsWith('.v') ? trimmed : `${trimmed}.v`
+  return isFpgaFilename(withV) ? withV : null
+}
+
+export function binDownloadName(top: string): string {
+  const stem = top.trim()
+  if (FPGA_IDENT_RE.test(stem)) return `${stem}.bin`
+  return 'top_module.bin'
 }
 
 export function nextFpgaFilename(existing: string[]): string {
@@ -36,6 +49,18 @@ export function deleteFpgaFile(files: FpgaFile[], name: string): FpgaFile[] {
 export function addFpgaFile(files: FpgaFile[], content = ''): FpgaFile[] {
   const name = nextFpgaFilename(files.map((f) => f.name))
   return [...files, { name, content, open: true }]
+}
+
+export function renameFpgaFile(
+  files: FpgaFile[],
+  from: string,
+  rawTo: string,
+): FpgaFile[] {
+  const to = normalizeFpgaFilename(rawTo)
+  if (!to || to === from) return files
+  if (!files.some((f) => f.name === from)) return files
+  if (files.some((f) => f.name === to)) return files
+  return files.map((f) => (f.name === from ? { ...f, name: to } : f))
 }
 
 /** Basename only; skip junk and non-.v. */

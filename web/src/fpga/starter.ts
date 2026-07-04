@@ -2,7 +2,7 @@
 
 import type { FpgaFile } from '@/fpga/files'
 
-export const BLINKY_TOP = 'azukar_lab'
+export const BLINKY_TOP = 'top_module'
 
 export const UART_TX_VERILOG = `// uart_tx — 8N1, LSB first. Default 115200 @ 12 MHz (DIV=104).
 // wr un ciclo con busy=0 encola un byte. tx idle = 1.
@@ -58,7 +58,7 @@ export const BLINKY_VERILOG = `// Azukar v2 — laboratorio de puertas + contado
 // CLK12 pin 49 (12 MHz). LEDs 37–45. Botones BTN*_ activos en BAJO.
 // TX pin 63 → FT2232H canal B. 115200 8N1 (igual que el combo UART).
 
-module azukar_lab (
+module top_module (
     input  CLK12,
     input  BTN0_,
     input  BTN1_,
@@ -145,6 +145,6 @@ endmodule
 `
 
 export const FPGA_STARTER: FpgaFile[] = [
-  { name: 'azukar_lab.v', open: true, content: BLINKY_VERILOG },
+  { name: 'top_module.v', open: true, content: BLINKY_VERILOG },
   { name: 'uart_tx.v', open: true, content: UART_TX_VERILOG },
 ]

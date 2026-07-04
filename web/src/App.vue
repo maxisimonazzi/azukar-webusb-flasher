@@ -7,9 +7,12 @@ import AppButton from '@/components/ui/AppButton.vue'
 import { compileFpga } from '@/fpga/compile'
 import {
   addFpgaFile,
+  binDownloadName,
   closeFpgaTab,
   deleteFpgaFile,
+  normalizeFpgaFilename,
   openFpgaTab,
+  renameFpgaFile,
   visibleFpgaTabs,
   type FpgaFile,
 } from '@/fpga/files'
@@ -47,9 +50,10 @@ import {
 } from '@/prefs/editorFont'
 import { setLocalePreference } from '@/prefs/locale'
 import { beginThemeTransition, setThemePreference, themeRef } from '@/prefs/theme'
-import type { AppLocale, AppTheme } from '@/prefs/types'
+import { FIREFOX_NOTICE_KEY, type AppLocale, type AppTheme } from '@/prefs/types'
 
 type DumpDest = 'console' | 'bin' | 'hex'
+type FpgaMenu = 'flash' | 'sram' | 'read' | 'eeprom'
 type UsbAction =
   | 'connect'
   | 'disconnect'
@@ -65,12 +69,10 @@ const { t, locale } = useI18n()
 
 const isDark = computed(() => themeRef.value === 'dark')
 const files = ref<FpgaFile[]>(FPGA_STARTER.map((f) => ({ ...f })))
-const activeName = ref(FPGA_STARTER[0]?.name ?? 'azukar_lab.v')
+const activeName = ref(FPGA_STARTER[0]?.name ?? 'top_module.v')
 const top = ref(BLINKY_TOP)
 const bin = shallowRef<Uint8Array | null>(null)
 const logText = ref('')
-const error = ref('')
-const errorLink = ref<string | null>(null)
 const busyCompile = ref(false)
 const usbAction = ref<UsbAction | null>(null)
 const boardConnected = ref(false)
@@ -80,6 +82,12 @@ const progressTotal = ref(0)
 const progressLabel = ref('')
 const showNoBin = ref(false)
 const showFirefoxNotice = ref(false)
+const openMenu = ref<FpgaMenu | null>(null)
+const compileBinLink = ref<{ n: number; name: string } | null>(null)
+const renaming = ref<string | null>(null)
+const renameDraft = ref('')
+const renameWhere = ref<'tree' | 'tabs' | null>(null)
+const renameInput = ref<HTMLInputElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const zipInput = ref<HTMLInputElement | null>(null)
 const logEl = ref<HTMLElement | null>(null)
@@ -98,9 +106,14 @@ let logRaf: number | null = null
 const logPending: string[] = []
 
 const slimBtn = '!h-[25px] min-h-[25px] px-2 text-xs rounded-md'
+const dropMenu =
+  'absolute z-30 mt-1 min-w-max rounded-lg border border-border bg-surface py-1 shadow-lg'
+const dropMenuStart = `${dropMenu} left-0`
+const dropMenuEnd = `${dropMenu} right-0`
+const dropItem =
+  'block w-full whitespace-nowrap px-3 py-2 text-left text-sm text-fg hover:bg-surface-2'
 const usbBusy = computed(() => usbAction.value != null)
 const uiLocked = computed(() => busyCompile.value)
-const hasBin = computed(() => bin.value != null && bin.value.length > 0)
 const progressPct = computed(() => {
   if (progressTotal.value <= 0) return 0
   return Math.min(100, Math.round((progressDone.value / progressTotal.value) * 100))
@@ -124,22 +137,13 @@ const lineCount = computed(() => {
 const lineCountLabel = computed(() => t('editor.lineCount', { n: lineCount.value }))
 const webserialAddonUrl = WEBSERIAL_FIREFOX_ADDON_URL
 
-function clearBanner() {
-  error.value = ''
-  errorLink.value = null
-}
-
-function setBanner(msg: string, link: string | null = null) {
-  error.value = msg
-  errorLink.value = link
-}
-
-function setNeedWebSerialBanner() {
+function logNeedWebSerial() {
   if (isFirefox()) {
-    setBanner(t('fpga.needWebSerialFirefox'), WEBSERIAL_FIREFOX_ADDON_URL)
+    appendLog(t('fpga.needWebSerialFirefox'))
+    appendLog(WEBSERIAL_FIREFOX_ADDON_URL)
     return
   }
-  setBanner(t('fpga.needWebSerial'))
+  appendLog(t('fpga.needWebSerial'))
 }
 
 function onTheme(next: AppTheme) {
@@ -164,6 +168,11 @@ function localeBtnClass(code: AppLocale): string {
 
 function dismissFirefoxNotice() {
   showFirefoxNotice.value = false
+  try {
+    sessionStorage.setItem(FIREFOX_NOTICE_KEY, '1')
+  } catch {
+    /* private mode */
+  }
 }
 
 function onLocale(next: AppLocale) {
@@ -189,6 +198,7 @@ function onOpenFile(name: string) {
 }
 
 function onCloseTab(name: string) {
+  if (renaming.value === name) cancelRename()
   files.value = closeFpgaTab(files.value, name)
   if (activeName.value !== name) return
   const next = visibleFpgaTabs(files.value)[0]
@@ -200,16 +210,64 @@ function onAddFile() {
   if (next.length === files.value.length) return
   files.value = next
   const added = next[next.length - 1]
-  if (added) activeName.value = added.name
+  if (added) {
+    activeName.value = added.name
+    beginRename(added.name, 'tabs')
+  }
 }
 
 function onDeleteFile(name: string) {
   if (files.value.length <= 1) return
   const next = deleteFpgaFile(files.value, name)
   files.value = next
+  if (renaming.value === name) {
+    renaming.value = null
+    renameWhere.value = null
+  }
   if (activeName.value === name) {
     const open = visibleFpgaTabs(next)[0]
     activeName.value = open?.name ?? next[0]?.name ?? ''
+  }
+}
+
+function beginRename(name: string, where: 'tree' | 'tabs') {
+  if (renaming.value && renaming.value !== name) commitRename()
+  renaming.value = name
+  renameWhere.value = where
+  renameDraft.value = name.replace(/\.v$/i, '')
+  void nextTick(() => {
+    renameInput.value?.focus()
+    renameInput.value?.select()
+  })
+}
+
+function commitRename() {
+  const from = renaming.value
+  if (!from) return
+  const next = renameFpgaFile(files.value, from, renameDraft.value)
+  const to = normalizeFpgaFilename(renameDraft.value)
+  files.value = next
+  if (to && next.some((f) => f.name === to)) {
+    if (activeName.value === from) activeName.value = to
+  }
+  renaming.value = null
+  renameWhere.value = null
+}
+
+function cancelRename() {
+  renaming.value = null
+  renameWhere.value = null
+}
+
+function onRenameKey(ev: KeyboardEvent) {
+  if (ev.key === 'Enter') {
+    ev.preventDefault()
+    commitRename()
+    return
+  }
+  if (ev.key === 'Escape') {
+    ev.preventDefault()
+    cancelRename()
   }
 }
 
@@ -230,14 +288,14 @@ async function onZipFile(ev: Event) {
   try {
     const imported = await verilogFilesFromZip(await file.arrayBuffer())
     if (imported.length === 0) {
-      setBanner(t('fpga.zipNoVerilog'))
+      appendLog(t('fpga.zipNoVerilog'))
       return
     }
     files.value = imported.map((f) => ({ ...f, open: true }))
     activeName.value = files.value[0]?.name ?? ''
     appendLog(t('fpga.zipImported', { n: imported.length, name: file.name }))
   } catch (err) {
-    setBanner(err instanceof Error ? err.message : t('fpga.zipReadFailed'))
+    appendLog(err instanceof Error ? err.message : t('fpga.zipReadFailed'))
   }
 }
 
@@ -258,9 +316,8 @@ function clearUart() {
 }
 
 async function onUartConnect() {
-  clearBanner()
   if (!hasWebSerial()) {
-    setNeedWebSerialBanner()
+    logNeedWebSerial()
     return
   }
   uartBusy.value = true
@@ -278,10 +335,10 @@ async function onUartConnect() {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('No port selected') || msg.toLowerCase().includes('cancel')) return
     if (msg === 'NEED_WEB_SERIAL') {
-      setNeedWebSerialBanner()
+      logNeedWebSerial()
       return
     }
-    setBanner(uartErrorMessage(err))
+    appendLog(uartErrorMessage(err))
   } finally {
     uartBusy.value = false
   }
@@ -315,6 +372,7 @@ function appendLog(line: string) {
 function clearLog() {
   logPending.length = 0
   logText.value = ''
+  compileBinLink.value = null
 }
 
 function setBin(next: Uint8Array) {
@@ -384,7 +442,6 @@ function progressPhrase(phase: string): string {
 }
 
 async function onCompile() {
-  clearBanner()
   showNoBin.value = false
   if (busyCompile.value) return
   busyCompile.value = true
@@ -398,11 +455,12 @@ async function onCompile() {
     if (result.status === 'success' && result.bin) {
       setBin(result.bin)
       appendLog(t('fpga.binReady', { n: result.bin.length }))
+      compileBinLink.value = { n: result.bin.length, name: binDownloadName(top.value) }
     } else if (result.status !== 'success') {
-      setBanner(t('fpga.compileNoBin'))
+      appendLog(t('fpga.compileNoBin'))
     }
   } catch (err) {
-    setBanner(compileErrorMessage(err))
+    appendLog(compileErrorMessage(err))
   } finally {
     busyCompile.value = false
   }
@@ -414,7 +472,7 @@ function onProgress(done: number, total: number, phase: string) {
   progressLabel.value = progressPhrase(phase)
 }
 
-watch(logText, async () => {
+watch([logText, compileBinLink], async () => {
   await nextTick()
   const el = logEl.value
   if (el) el.scrollTop = el.scrollHeight
@@ -426,14 +484,41 @@ watch(uartText, async () => {
   if (el) el.scrollTop = el.scrollHeight
 })
 
-function closeDetails(ev: Event) {
-  const details = (ev.currentTarget as HTMLElement).closest('details')
-  if (details) details.open = false
+function closeMenu() {
+  openMenu.value = null
+}
+
+function toggleMenu(id: FpgaMenu) {
+  if (usbBusy.value) return
+  switch (id) {
+    case 'flash':
+    case 'sram':
+      if (uiLocked.value) return
+      break
+    case 'read':
+    case 'eeprom':
+      break
+    default: {
+      const _exhaustive: never = id
+      return _exhaustive
+    }
+  }
+  openMenu.value = openMenu.value === id ? null : id
+}
+
+function onPointerDownAway(ev: PointerEvent) {
+  const node = ev.target
+  if (!(node instanceof Element) || node.closest('[data-fpga-drop]')) return
+  closeMenu()
 }
 
 function needWebUsb(): boolean {
+  if (isFirefox()) {
+    appendLog(t('fpga.needWebUsbFirefox'))
+    return false
+  }
   if (navigator.usb) return true
-  setBanner(t('fpga.needWebUsb'))
+  appendLog(t('fpga.needWebUsb'))
   return false
 }
 
@@ -445,7 +530,7 @@ function usbCatch(label: string, err: unknown) {
     appendLog(t('fpga.noUsbDevice'))
     return
   }
-  setBanner(t(key))
+  appendLog(t(key))
   appendLog(t('fpga.usbFailed', { label, msg }))
 }
 
@@ -487,13 +572,12 @@ async function doSram() {
   showNoBin.value = false
   await runUsb('sram', async () => {
     const stats = await programIce40Sram(bin.value!, appendLog, onProgress)
-    if (!stats.cdone) setBanner(t('fpga.sramCdoneLow'))
+    if (!stats.cdone) appendLog(t('fpga.sramCdoneLow'))
   })
 }
 
-function onFlashCompiled(ev?: Event) {
-  if (ev) closeDetails(ev)
-  clearBanner()
+function onFlashCompiled() {
+  closeMenu()
   if (!bin.value) {
     showNoBin.value = true
     return
@@ -501,9 +585,8 @@ function onFlashCompiled(ev?: Event) {
   void doProgram()
 }
 
-function onSramCompiled(ev?: Event) {
-  if (ev) closeDetails(ev)
-  clearBanner()
+function onSramCompiled() {
+  closeMenu()
   if (!bin.value) {
     showNoBin.value = true
     return
@@ -511,22 +594,19 @@ function onSramCompiled(ev?: Event) {
   void doSram()
 }
 
-function onFlashUpload(ev: Event) {
-  closeDetails(ev)
-  clearBanner()
+function onFlashUpload() {
+  closeMenu()
   uploadThen.value = 'flash'
   fileInput.value?.click()
 }
 
-function onSramUpload(ev: Event) {
-  closeDetails(ev)
-  clearBanner()
+function onSramUpload() {
+  closeMenu()
   uploadThen.value = 'sram'
   fileInput.value?.click()
 }
 
 async function onReset() {
-  clearBanner()
   clearUart()
   await runUsb('reset', async () => {
     appendLog(t('fpga.resetLog'))
@@ -535,16 +615,14 @@ async function onReset() {
 }
 
 async function onErase() {
-  clearBanner()
   if (!window.confirm(t('fpga.eraseConfirm'))) {
     return
   }
   await runUsb('erase', () => eraseIce40Flash(appendLog))
 }
 
-async function onReadFlash(dest: DumpDest, ev: Event) {
-  closeDetails(ev)
-  clearBanner()
+async function onReadFlash(dest: DumpDest) {
+  closeMenu()
   await runUsb('read', async () => {
     const dump = await readIce40Flash(appendLog, onProgress)
     if (dest === 'console') {
@@ -575,14 +653,13 @@ async function onReadFlash(dest: DumpDest, ev: Event) {
 }
 
 async function onConnect() {
-  clearBanner()
+  if (!needWebUsb()) return
   appendLog(t('fpga.connectPicker'))
   await runUsb('connect', () => connectMpsse(appendLog, { forcePicker: true }))
 }
 
-async function onReadEeprom(dest: DumpDest, ev: Event) {
-  closeDetails(ev)
-  clearBanner()
+async function onReadEeprom(dest: DumpDest) {
+  closeMenu()
   await runUsb('eeprom', async () => {
     const raw = await readFtdiConfigEeprom(appendLog)
     if (dest === 'console') return
@@ -596,16 +673,7 @@ async function onReadEeprom(dest: DumpDest, ev: Event) {
   })
 }
 
-function onDownloadBin() {
-  if (!bin.value || !binObjectUrl.value) return
-  const a = document.createElement('a')
-  a.href = binObjectUrl.value
-  a.download = 'azukar.bin'
-  a.click()
-}
-
 async function onDisconnect() {
-  clearBanner()
   await runUsb('disconnect', () => disconnectMpsse(appendLog))
 }
 
@@ -657,10 +725,18 @@ onMounted(() => {
   stopConnectionWatch = onMpsseConnectionChange((open) => {
     boardConnected.value = open
   })
-  if (isFirefox()) showFirefoxNotice.value = true
+  document.addEventListener('pointerdown', onPointerDownAway)
+  if (!isFirefox()) return
+  try {
+    if (sessionStorage.getItem(FIREFOX_NOTICE_KEY) === '1') return
+  } catch {
+    /* private mode: show once this load */
+  }
+  showFirefoxNotice.value = true
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onPointerDownAway)
   stopConnectionWatch?.()
   if (logRaf != null) cancelAnimationFrame(logRaf)
   if (uartRaf != null) cancelAnimationFrame(uartRaf)
@@ -765,7 +841,18 @@ onBeforeUnmount(() => {
                 class="flex items-stretch"
                 :class="f.name === activeName && f.open ? 'bg-surface-2' : ''"
               >
+                <input
+                  v-if="renaming === f.name && renameWhere === 'tree'"
+                  ref="renameInput"
+                  v-model="renameDraft"
+                  class="min-w-0 flex-1 bg-surface px-3 py-1.5 font-mono text-sm text-fg outline-none"
+                  :aria-label="t('fpga.renameHint')"
+                  @click.stop
+                  @keydown="onRenameKey"
+                  @blur="commitRename"
+                >
                 <button
+                  v-else
                   type="button"
                   class="min-w-0 flex-1 truncate px-3 py-1.5 text-left font-mono text-sm"
                   :class="
@@ -775,8 +862,9 @@ onBeforeUnmount(() => {
                         : 'text-fg hover:text-primary'
                       : 'text-muted hover:text-fg'
                   "
-                  :title="f.name"
+                  :title="t('fpga.renameHint')"
                   @click="onOpenFile(f.name)"
+                  @dblclick.stop="beginRename(f.name, 'tree')"
                 >
                   {{ f.name }}
                 </button>
@@ -796,27 +884,44 @@ onBeforeUnmount(() => {
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
           <div class="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-surface-2 px-2 py-0">
             <div class="flex min-w-0 flex-1 items-stretch overflow-x-auto" role="tablist">
-              <button
+              <div
                 v-for="f in openTabs"
                 :key="f.name"
-                type="button"
                 role="tab"
                 :aria-selected="f.name === activeName"
-                class="relative shrink-0 border-t-2 px-3 py-2 text-sm font-semibold whitespace-nowrap"
+                class="relative flex shrink-0 items-center border-t-2 px-3 py-2 text-sm font-semibold whitespace-nowrap"
                 :class="
                   f.name === activeName
                     ? 'border-primary bg-surface text-fg'
                     : 'border-transparent text-muted hover:bg-surface/60 hover:text-fg'
                 "
-                @click="activeName = f.name"
               >
-                {{ f.name }}
+                <input
+                  v-if="renaming === f.name && renameWhere === 'tabs'"
+                  ref="renameInput"
+                  v-model="renameDraft"
+                  class="w-28 bg-transparent font-mono text-sm text-fg outline-none"
+                  :aria-label="t('fpga.renameHint')"
+                  @click.stop
+                  @keydown="onRenameKey"
+                  @blur="commitRename"
+                >
+                <button
+                  v-else
+                  type="button"
+                  class="bg-transparent p-0 font-semibold text-inherit"
+                  :title="t('fpga.renameHint')"
+                  @click="activeName = f.name"
+                  @dblclick.stop="beginRename(f.name, 'tabs')"
+                >
+                  {{ f.name }}
+                </button>
                 <span
                   class="ml-2 text-muted hover:text-error"
                   :title="t('fpga.closeTab')"
                   @click.stop="onCloseTab(f.name)"
                 >×</span>
-              </button>
+              </div>
               <button
                 type="button"
                 class="my-1 ml-1 self-center rounded-sm border border-dashed border-primary/60 px-2 py-0.5 text-sm font-bold text-primary hover:bg-primary/10"
@@ -904,7 +1009,7 @@ onBeforeUnmount(() => {
         >
         <div class="flex min-h-0 flex-1 flex-col gap-2">
           <div class="flex min-h-0 flex-[1.2] flex-col overflow-hidden rounded-xl border border-border bg-surface">
-            <div class="shrink-0 border-b border-border px-2 py-1.5">
+            <div class="relative z-20 shrink-0 border-b border-border px-2 py-1.5">
               <div class="flex flex-wrap items-center gap-1.5">
                 <span
                   class="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
@@ -950,98 +1055,80 @@ onBeforeUnmount(() => {
                 >
                   {{ busyCompile ? t('fpga.compiling') : t('fpga.compile') }}
                 </AppButton>
-                <AppButton
-                  size="sm"
-                  variant="outline"
-                  :class="slimBtn"
-                  :disabled="!hasBin"
-                  :title="t('fpga.downloadBinHint')"
-                  @click="onDownloadBin"
-                >
-                  {{ t('fpga.downloadBin') }}
-                </AppButton>
-                <details class="relative">
-                  <summary
-                    class="inline-flex h-[25px] cursor-pointer list-none items-center rounded-md border border-border bg-surface-2 px-2 text-xs font-semibold text-fg hover:bg-surface-3 [&::-webkit-details-marker]:hidden"
+                <div data-fpga-drop class="relative">
+                  <button
+                    type="button"
+                    class="inline-flex h-[25px] cursor-pointer items-center rounded-md border border-border bg-surface-2 px-2 text-xs font-semibold text-fg hover:bg-surface-3"
                     :class="usbBusy || uiLocked ? 'pointer-events-none opacity-60' : ''"
+                    @click="toggleMenu('flash')"
                   >
                     {{ usbAction === 'program' ? t('fpga.flashing') : t('fpga.flash') }}
-                  </summary>
-                  <div class="absolute z-20 mt-1 min-w-[15rem] rounded-lg border border-border bg-surface py-1 shadow-lg">
-                    <button
-                      type="button"
-                      class="block w-full px-3 py-2 text-left text-sm text-fg hover:bg-surface-2"
-                      @click="onFlashCompiled"
-                    >
+                  </button>
+                  <div v-if="openMenu === 'flash'" :class="dropMenuStart">
+                    <button type="button" :class="dropItem" @click="onFlashCompiled">
                       {{ t('fpga.flashCompiled') }}
                     </button>
-                    <button
-                      type="button"
-                      class="block w-full px-3 py-2 text-left text-sm text-fg hover:bg-surface-2"
-                      @click="onFlashUpload"
-                    >
+                    <button type="button" :class="dropItem" @click="onFlashUpload">
                       {{ t('fpga.flashUpload') }}
                     </button>
                   </div>
-                </details>
-                <details class="relative">
-                  <summary
-                    class="inline-flex h-[25px] cursor-pointer list-none items-center rounded-md border border-border-strong bg-transparent px-2 text-xs font-semibold text-fg hover:bg-surface-2 [&::-webkit-details-marker]:hidden"
+                </div>
+                <div data-fpga-drop class="relative">
+                  <button
+                    type="button"
+                    class="inline-flex h-[25px] cursor-pointer items-center rounded-md border border-border-strong bg-transparent px-2 text-xs font-semibold text-fg hover:bg-surface-2"
                     :class="usbBusy || uiLocked ? 'pointer-events-none opacity-60' : ''"
                     :title="t('fpga.sramHint')"
+                    @click="toggleMenu('sram')"
                   >
                     {{ usbAction === 'sram' ? t('fpga.sramming') : t('fpga.sram') }}
-                  </summary>
-                  <div class="absolute z-20 mt-1 min-w-[15rem] rounded-lg border border-border bg-surface py-1 shadow-lg">
-                    <button
-                      type="button"
-                      class="block w-full px-3 py-2 text-left text-sm text-fg hover:bg-surface-2"
-                      @click="onSramCompiled"
-                    >
+                  </button>
+                  <div v-if="openMenu === 'sram'" :class="dropMenuStart">
+                    <button type="button" :class="dropItem" @click="onSramCompiled">
                       {{ t('fpga.sramCompiled') }}
                     </button>
-                    <button
-                      type="button"
-                      class="block w-full px-3 py-2 text-left text-sm text-fg hover:bg-surface-2"
-                      @click="onSramUpload"
-                    >
+                    <button type="button" :class="dropItem" @click="onSramUpload">
                       {{ t('fpga.sramUpload') }}
                     </button>
                   </div>
-                </details>
+                </div>
                 <AppButton size="sm" variant="outline" :class="slimBtn" :disabled="usbBusy" @click="onErase">
                   {{ usbAction === 'erase' ? t('fpga.erasing') : t('fpga.eraseFlash') }}
                 </AppButton>
-                <details class="relative">
-                  <summary
-                    class="inline-flex h-[25px] cursor-pointer list-none items-center rounded-md border border-border-strong bg-transparent px-2 text-xs font-semibold text-fg hover:bg-surface-2 [&::-webkit-details-marker]:hidden"
+                <div data-fpga-drop class="relative">
+                  <button
+                    type="button"
+                    class="inline-flex h-[25px] cursor-pointer items-center rounded-md border border-border-strong bg-transparent px-2 text-xs font-semibold text-fg hover:bg-surface-2"
                     :class="usbBusy ? 'pointer-events-none opacity-60' : ''"
+                    @click="toggleMenu('read')"
                   >
                     {{ usbAction === 'read' ? t('fpga.reading') : t('fpga.readFlash') }}
-                  </summary>
-                  <div class="absolute z-20 mt-1 min-w-[14rem] rounded-lg border border-border bg-surface py-1 shadow-lg">
-                    <button type="button" class="block w-full px-3 py-2 text-left text-sm text-fg hover:bg-surface-2" @click="onReadFlash('bin', $event)">{{ t('fpga.readDownloadBin') }}</button>
-                    <button type="button" class="block w-full px-3 py-2 text-left text-sm text-fg hover:bg-surface-2" @click="onReadFlash('hex', $event)">{{ t('fpga.readDownloadHex') }}</button>
-                    <button type="button" class="block w-full px-3 py-2 text-left text-sm text-fg hover:bg-surface-2" @click="onReadFlash('console', $event)">{{ t('fpga.readShowConsole') }}</button>
+                  </button>
+                  <div v-if="openMenu === 'read'" :class="dropMenuEnd">
+                    <button type="button" :class="dropItem" @click="onReadFlash('bin')">{{ t('fpga.readDownloadBin') }}</button>
+                    <button type="button" :class="dropItem" @click="onReadFlash('hex')">{{ t('fpga.readDownloadHex') }}</button>
+                    <button type="button" :class="dropItem" @click="onReadFlash('console')">{{ t('fpga.readShowConsole') }}</button>
                   </div>
-                </details>
-                <AppButton size="sm" variant="outline" :class="slimBtn" :disabled="usbBusy" @click="onReset">
-                  {{ usbAction === 'reset' ? t('fpga.resetting') : t('fpga.reset') }}
-                </AppButton>
-                <details class="relative">
-                  <summary
-                    class="inline-flex h-[25px] cursor-pointer list-none items-center rounded-md border border-border-strong bg-transparent px-2 text-xs font-semibold text-fg hover:bg-surface-2 [&::-webkit-details-marker]:hidden"
+                </div>
+                <div data-fpga-drop class="relative">
+                  <button
+                    type="button"
+                    class="inline-flex h-[25px] cursor-pointer items-center rounded-md border border-border-strong bg-transparent px-2 text-xs font-semibold text-fg hover:bg-surface-2"
                     :class="usbBusy ? 'pointer-events-none opacity-60' : ''"
                     :title="t('fpga.readEepromHint')"
+                    @click="toggleMenu('eeprom')"
                   >
                     {{ usbAction === 'eeprom' ? t('fpga.eepromBusy') : t('fpga.readEeprom') }}
-                  </summary>
-                  <div class="absolute z-20 mt-1 min-w-[14rem] rounded-lg border border-border bg-surface py-1 shadow-lg">
-                    <button type="button" class="block w-full px-3 py-2 text-left text-sm text-fg hover:bg-surface-2" @click="onReadEeprom('bin', $event)">{{ t('fpga.readDownloadBin') }}</button>
-                    <button type="button" class="block w-full px-3 py-2 text-left text-sm text-fg hover:bg-surface-2" @click="onReadEeprom('hex', $event)">{{ t('fpga.readDownloadHex') }}</button>
-                    <button type="button" class="block w-full px-3 py-2 text-left text-sm text-fg hover:bg-surface-2" @click="onReadEeprom('console', $event)">{{ t('fpga.readShowConsole') }}</button>
+                  </button>
+                  <div v-if="openMenu === 'eeprom'" :class="dropMenuEnd">
+                    <button type="button" :class="dropItem" @click="onReadEeprom('bin')">{{ t('fpga.readDownloadBin') }}</button>
+                    <button type="button" :class="dropItem" @click="onReadEeprom('hex')">{{ t('fpga.readDownloadHex') }}</button>
+                    <button type="button" :class="dropItem" @click="onReadEeprom('console')">{{ t('fpga.readShowConsole') }}</button>
                   </div>
-                </details>
+                </div>
+                <AppButton size="sm" variant="outline" :class="slimBtn" :disabled="usbBusy" @click="onReset">
+                  {{ t('fpga.reset') }}
+                </AppButton>
               </div>
               <div v-if="showProgress" class="mt-1.5">
                 <div class="mb-1 flex justify-between text-xs text-muted">
@@ -1053,34 +1140,17 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
-            <div ref="logEl" class="relative min-h-0 flex-1 overflow-y-auto">
-              <div
-                v-if="error"
-                role="alert"
-                class="sticky top-0 z-10 border-b border-error/30 bg-surface/95 px-3 py-2 shadow-sm"
-              >
-                <div class="flex items-start gap-2">
-                  <p class="min-w-0 flex-1 text-sm leading-snug text-error">{{ error }}</p>
-                  <button
-                    type="button"
-                    class="shrink-0 text-sm leading-none text-muted hover:text-fg"
-                    :aria-label="t('fpga.dismissError')"
-                    @click="clearBanner"
-                  >
-                    ×
-                  </button>
-                </div>
-                <a
-                  v-if="errorLink"
-                  class="mt-1 block break-all text-xs text-primary underline"
-                  :href="errorLink"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >{{ errorLink }}</a>
-              </div>
+            <div ref="logEl" class="min-h-0 flex-1 overflow-y-auto">
               <pre class="p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-fg">{{
                 logText || t('fpga.logEmpty')
               }}</pre>
+              <a
+                v-if="compileBinLink && binObjectUrl"
+                class="block px-3 pb-3 font-mono text-xs text-primary underline"
+                :href="binObjectUrl"
+                :download="compileBinLink.name"
+                :title="t('fpga.downloadBinHint')"
+              >{{ t('fpga.binConsoleLink', { name: compileBinLink.name, n: compileBinLink.n }) }}</a>
             </div>
           </div>
           <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">

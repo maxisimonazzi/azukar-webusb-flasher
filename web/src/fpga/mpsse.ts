@@ -1,4 +1,4 @@
-import { ftdiPacketPayload } from '@/fpga/ftdiUsb'
+import { FTDI_BULK_PACKET, ftdiPayloadFromBulkIn } from '@/fpga/ftdiUsb'
 import {
   FTDI_PID,
   FTDI_VID,
@@ -63,7 +63,7 @@ async function send(device: USBDevice, bytes: number[]): Promise<void> {
 
 async function recv(device: USBDevice, length: number): Promise<Uint8Array> {
   const result = await Promise.race([
-    device.transferIn(IN_EP, length),
+    device.transferIn(IN_EP, Math.min(length, FTDI_BULK_PACKET)),
     sleep(4000).then(() => {
       throw new Error('FTDI transferIn timeout (4s)')
     }),
@@ -71,11 +71,12 @@ async function recv(device: USBDevice, length: number): Promise<Uint8Array> {
   if (result.status !== 'ok' || !result.data) {
     throw new Error('FTDI transferIn failed')
   }
-  return new Uint8Array(
+  const raw = new Uint8Array(
     result.data.buffer,
     result.data.byteOffset,
     result.data.byteLength,
   )
+  return ftdiPayloadFromBulkIn(raw)
 }
 
 async function recvExact(device: USBDevice, nbytes: number): Promise<Uint8Array> {
@@ -83,8 +84,7 @@ async function recvExact(device: USBDevice, nbytes: number): Promise<Uint8Array>
   let off = 0
   let empty = 0
   while (off < nbytes) {
-    const raw = await recv(device, Math.min(512, nbytes - off + 2))
-    const payload = ftdiPacketPayload(raw)
+    const payload = await recv(device, nbytes - off + 2)
     if (payload.length === 0) {
       empty += 1
       if (empty > 80) {

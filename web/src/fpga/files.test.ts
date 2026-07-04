@@ -11,6 +11,9 @@ import {
   uniquifyFpgaName,
   visibleFpgaTabs,
   zipPathToVerilogName,
+  binDownloadName,
+  normalizeFpgaFilename,
+  renameFpgaFile,
 } from './files.ts'
 
 test('accepts identifier.v names', () => {
@@ -79,4 +82,31 @@ test('zip path uses basename and skips junk', () => {
 test('uniquifyFpgaName suffixes collisions', () => {
   const taken = new Set(['and2.v'])
   assert.equal(uniquifyFpgaName('and2.v', taken), 'and2_2.v')
+})
+
+test('normalizeFpgaFilename adds .v and rejects junk', () => {
+  assert.equal(normalizeFpgaFilename('top_module'), 'top_module.v')
+  assert.equal(normalizeFpgaFilename('top_module.v'), 'top_module.v')
+  assert.equal(normalizeFpgaFilename('  foo  '), 'foo.v')
+  assert.equal(normalizeFpgaFilename('1bad'), null)
+  assert.equal(normalizeFpgaFilename('../x'), null)
+})
+
+test('renameFpgaFile changes the name when free and valid', () => {
+  const files = [
+    { name: 'mod.v', content: 'a', open: true },
+    { name: 'uart_tx.v', content: 'b', open: true },
+  ]
+  const next = renameFpgaFile(files, 'mod.v', 'gates')
+  assert.deepEqual(
+    next.map((f) => f.name),
+    ['gates.v', 'uart_tx.v'],
+  )
+  assert.equal(renameFpgaFile(files, 'mod.v', 'uart_tx')[0]?.name, 'mod.v')
+})
+
+test('binDownloadName follows the top module', () => {
+  assert.equal(binDownloadName('top_module'), 'top_module.bin')
+  assert.equal(binDownloadName(' blinky '), 'blinky.bin')
+  assert.equal(binDownloadName('not a name'), 'top_module.bin')
 })
