@@ -1,5 +1,5 @@
 {
-  "name": "azukar-webusb-flasher",
+  "name": "lattice-webusb-flasher",
   "private": true,
   "version": "0.1.0",
   "type": "module",

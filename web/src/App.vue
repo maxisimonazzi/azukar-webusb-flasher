@@ -88,6 +88,7 @@ const renaming = ref<string | null>(null)
 const renameDraft = ref('')
 const renameWhere = ref<'tree' | 'tabs' | null>(null)
 const renameInput = ref<HTMLInputElement | null>(null)
+let renameReady = false
 const fileInput = ref<HTMLInputElement | null>(null)
 const zipInput = ref<HTMLInputElement | null>(null)
 const logEl = ref<HTMLElement | null>(null)
@@ -232,18 +233,28 @@ function onDeleteFile(name: string) {
 
 function beginRename(name: string, where: 'tree' | 'tabs') {
   if (renaming.value && renaming.value !== name) commitRename()
+  renameReady = false
   renaming.value = name
   renameWhere.value = where
   renameDraft.value = name.replace(/\.v$/i, '')
-  void nextTick(() => {
-    renameInput.value?.focus()
-    renameInput.value?.select()
+}
+
+function bindRenameInput(el: unknown) {
+  if (!(el instanceof HTMLInputElement)) return
+  renameInput.value = el
+  el.focus()
+  el.select()
+  requestAnimationFrame(() => {
+    renameReady = true
+    el.focus()
   })
 }
 
 function commitRename() {
+  if (!renameReady) return
   const from = renaming.value
   if (!from) return
+  renameReady = false
   const next = renameFpgaFile(files.value, from, renameDraft.value)
   const to = normalizeFpgaFilename(renameDraft.value)
   files.value = next
@@ -255,6 +266,7 @@ function commitRename() {
 }
 
 function cancelRename() {
+  renameReady = false
   renaming.value = null
   renameWhere.value = null
 }
@@ -843,7 +855,7 @@ onBeforeUnmount(() => {
               >
                 <input
                   v-if="renaming === f.name && renameWhere === 'tree'"
-                  ref="renameInput"
+                  :ref="bindRenameInput"
                   v-model="renameDraft"
                   class="min-w-0 flex-1 bg-surface px-3 py-1.5 font-mono text-sm text-fg outline-none"
                   :aria-label="t('fpga.renameHint')"
@@ -864,7 +876,7 @@ onBeforeUnmount(() => {
                   "
                   :title="t('fpga.renameHint')"
                   @click="onOpenFile(f.name)"
-                  @dblclick.stop="beginRename(f.name, 'tree')"
+                  @dblclick.prevent.stop="beginRename(f.name, 'tree')"
                 >
                   {{ f.name }}
                 </button>
@@ -898,7 +910,7 @@ onBeforeUnmount(() => {
               >
                 <input
                   v-if="renaming === f.name && renameWhere === 'tabs'"
-                  ref="renameInput"
+                  :ref="bindRenameInput"
                   v-model="renameDraft"
                   class="w-28 bg-transparent font-mono text-sm text-fg outline-none"
                   :aria-label="t('fpga.renameHint')"
@@ -912,7 +924,7 @@ onBeforeUnmount(() => {
                   class="bg-transparent p-0 font-semibold text-inherit"
                   :title="t('fpga.renameHint')"
                   @click="activeName = f.name"
-                  @dblclick.stop="beginRename(f.name, 'tabs')"
+                  @dblclick.prevent.stop="beginRename(f.name, 'tabs')"
                 >
                   {{ f.name }}
                 </button>

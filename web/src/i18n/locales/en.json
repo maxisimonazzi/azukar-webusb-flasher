@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Azukar WebUSB Flasher",
+    "title": "Lattice iCE40 FPGA Web Flasher",
     "themeLight": "Light",
     "themeDark": "Dark",
     "localeEs": "ES",

@@ -6,7 +6,7 @@
 # web        = SPA + nginx. El USB lo habla el navegador de ESTA máquina,
 #              nunca el contenedor. nginx proxea /compile → toolchain.
 
-name: azukar-webusb-flasher
+name: lattice-webusb-flasher
 
 services:
   toolchain:
