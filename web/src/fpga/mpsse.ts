@@ -1,8 +1,8 @@
 import { FTDI_BULK_PACKET, ftdiPayloadFromBulkIn } from '@/fpga/ftdiUsb'
 import {
-  FTDI_PID,
-  FTDI_VID,
-  PIN_CDONE,
+  cdoneMask,
+  ftdiPid,
+  ftdiVid,
   iceprogChipDeselect,
   iceprogChipSelect,
   iceprogReleaseBus,
@@ -169,7 +169,7 @@ export const mpsse: Ice40Mpsse = {
       throw new Error('WebUSB vive en Chrome o Edge, en localhost o HTTPS.')
     }
     return navigator.usb.requestDevice({
-      filters: [{ vendorId: FTDI_VID, productId: FTDI_PID }],
+      filters: [{ vendorId: ftdiVid(), productId: ftdiPid() }],
     })
   },
 
@@ -265,7 +265,7 @@ export const mpsse: Ice40Mpsse = {
 
   async fpgaGetCdone(device) {
     const pins = await this.readPins(device)
-    return pins & PIN_CDONE ? 1 : 0
+    return pins & cdoneMask() ? 1 : 0
   },
 
   async flashReleasePowerDown(device) {

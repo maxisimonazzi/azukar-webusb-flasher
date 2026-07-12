@@ -1,8 +1,8 @@
 /**
  * GPIO low-byte encoding from IceStorm iceprog.c `set_cs_creset`.
  *
- * Bits live in boards/azukar-v2/board.json (programmer.adbus).
- * FT2232H ADBUS canal A, igual que Alhambra / Azukar:
+ * Bits come from the active board profile (programmer.adbus).
+ * Default is the Iceprog / Alhambra / Azukar / EDU-CIAA map:
  *   SCK, MOSI, CS#, CDONE, CRESET_B
  *
  * For flash, gpio value is 0: CS and CRESET are outputs only while driven
@@ -10,45 +10,65 @@
  * SRAM slave drives CRESET high so the mode-sample edge does not wait on
  * the 10 kΩ. Flash /CS and FPGA SPI_SS_B share ADBUS4; ADBUS3 is unused.
  */
-import board from '../../../boards/azukar-v2/board.json' with { type: 'json' }
+import { getActiveAdbus, getActivePid, getActiveVid } from '@/fpga/activeBoard'
+import { ICEPROG_ADBUS, type AdbusBits } from '@/fpga/boardTypes'
 
 function adbusMask(bit: number): number {
   return 1 << bit
 }
 
-const bits = board.programmer.adbus
+function bits(adbus: AdbusBits = getActiveAdbus()): AdbusBits {
+  return adbus
+}
 
-export const PIN_SCK = adbusMask(bits.sck)
-export const PIN_MOSI = adbusMask(bits.mosi)
-export const PIN_CS = adbusMask(bits.cs)
-export const PIN_CDONE = adbusMask(bits.cdone)
-export const PIN_CRESET = adbusMask(bits.creset)
+export const PIN_SCK = adbusMask(ICEPROG_ADBUS.sck)
+export const PIN_MOSI = adbusMask(ICEPROG_ADBUS.mosi)
+export const PIN_CS = adbusMask(ICEPROG_ADBUS.cs)
+export const PIN_CDONE = adbusMask(ICEPROG_ADBUS.cdone)
+export const PIN_CRESET = adbusMask(ICEPROG_ADBUS.creset)
 
-export const FTDI_VID = board.programmer.vid
-export const FTDI_PID = board.programmer.pid
+export const FTDI_VID = 0x0403
+export const FTDI_PID = 0x6010
+
+export function ftdiVid(): number {
+  return getActiveVid()
+}
+
+export function ftdiPid(): number {
+  return getActivePid()
+}
+
+export function cdoneMask(adbus: AdbusBits = getActiveAdbus()): number {
+  return adbusMask(adbus.cdone)
+}
 
 export type FtdiGpio = { value: number; direction: number }
 
-export function iceprogCsCreset(csLow: boolean, cresetLow: boolean): FtdiGpio {
-  let direction = PIN_SCK | PIN_MOSI
-  if (csLow) direction |= PIN_CS
-  if (cresetLow) direction |= PIN_CRESET
+export function iceprogCsCreset(
+  csLow: boolean,
+  cresetLow: boolean,
+  adbus: AdbusBits = getActiveAdbus(),
+): FtdiGpio {
+  const map = bits(adbus)
+  let direction = adbusMask(map.sck) | adbusMask(map.mosi)
+  if (csLow) direction |= adbusMask(map.cs)
+  if (cresetLow) direction |= adbusMask(map.creset)
   return { value: 0, direction }
 }
 
 /** FPGA in reset, flash selected. */
-export function iceprogChipSelect(): FtdiGpio {
-  return iceprogCsCreset(true, true)
+export function iceprogChipSelect(adbus?: AdbusBits): FtdiGpio {
+  return iceprogCsCreset(true, true, adbus ?? getActiveAdbus())
 }
 
 /** FPGA in reset, flash idle (CS high-Z). */
-export function iceprogChipDeselect(): FtdiGpio {
-  return iceprogCsCreset(false, true)
+export function iceprogChipDeselect(adbus?: AdbusBits): FtdiGpio {
+  return iceprogCsCreset(false, true, adbus ?? getActiveAdbus())
 }
 
 /** CS + CRESET high-Z. FPGA boots from flash. */
-export function iceprogReleaseBus(): FtdiGpio {
-  return iceprogCsCreset(false, false)
+export function iceprogReleaseBus(adbus?: AdbusBits): FtdiGpio {
+  return iceprogCsCreset(false, false, adbus ?? getActiveAdbus())
 }
 
 /**
@@ -61,25 +81,33 @@ export function iceprogReleaseBus(): FtdiGpio {
  * ADBUS3 is unused on this board. Flash /CS and FPGA SPI_SS_B are the same
  * net (ADBUS4). Separating them needs a copper cut, not another GPIO bit.
  */
-export function iceprogSramSelect(): FtdiGpio {
+export function iceprogSramSelect(adbus: AdbusBits = getActiveAdbus()): FtdiGpio {
+  const map = bits(adbus)
+  const creset = adbusMask(map.creset)
   return {
-    value: PIN_CRESET,
-    direction: PIN_SCK | PIN_MOSI | PIN_CS | PIN_CRESET,
+    value: creset,
+    direction: adbusMask(map.sck) | adbusMask(map.mosi) | adbusMask(map.cs) | creset,
   }
 }
 
 /** After the shift: CS high-Z, CRESET stays driven high — no CRESET edge, no flash boot. */
-export function iceprogSramReleaseCs(): FtdiGpio {
+export function iceprogSramReleaseCs(adbus: AdbusBits = getActiveAdbus()): FtdiGpio {
+  const map = bits(adbus)
+  const creset = adbusMask(map.creset)
   return {
-    value: PIN_CRESET,
-    direction: PIN_SCK | PIN_MOSI | PIN_CRESET,
+    value: creset,
+    direction: adbusMask(map.sck) | adbusMask(map.mosi) | creset,
   }
 }
 
 /** Decode ADBUS after a SETB/READB so the lab log shows CS / CRESET / CDONE. */
-export function formatAdbusPins(pins: number): string {
-  const cs = pins & PIN_CS ? 1 : 0
-  const creset = pins & PIN_CRESET ? 1 : 0
-  const cdone = pins & PIN_CDONE ? 1 : 0
+export function formatAdbusPins(
+  pins: number,
+  adbus: AdbusBits = getActiveAdbus(),
+): string {
+  const map = bits(adbus)
+  const cs = pins & adbusMask(map.cs) ? 1 : 0
+  const creset = pins & adbusMask(map.creset) ? 1 : 0
+  const cdone = pins & adbusMask(map.cdone) ? 1 : 0
   return `CS=${cs} CRESET=${creset} CDONE=${cdone} raw=0x${pins.toString(16).padStart(2, '0')}`
 }

@@ -1,5 +1,6 @@
-/** Azukar v2 lab. CLK12=49. LED0–7=37…45. BTN0_–BTN7_ active low. TX=63 @ 115200 8N1. */
+/** Lab starters keyed by board id. CLK / buttons / LEDs follow each PCF. */
 
+import { isCustomBoardId } from '@/fpga/boardTypes'
 import type { FpgaFile } from '@/fpga/files'
 
 export const BLINKY_TOP = 'top_module'
@@ -54,7 +55,7 @@ module uart_tx #(
 endmodule
 `
 
-export const BLINKY_VERILOG = `// Azukar v2 — laboratorio de puertas + contador 4 bit + UART TX.
+export const AZUKAR_VERILOG = `// Azukar v2 — laboratorio de puertas + contador 4 bit + UART TX.
 // CLK12 pin 49 (12 MHz). LEDs 37–45. Botones BTN*_ activos en BAJO.
 // TX pin 63 → FT2232H canal B. 115200 8N1 (igual que el combo UART).
 
@@ -144,7 +145,191 @@ module top_module (
 endmodule
 `
 
-export const FPGA_STARTER: FpgaFile[] = [
-  { name: 'top_module.v', open: true, content: BLINKY_VERILOG },
-  { name: 'uart_tx.v', open: true, content: UART_TX_VERILOG },
-]
+export const EDU_CIAA_VERILOG = `// EDU-CIAA-FPGA — contador 4 bit + UART TX.
+// CLK pin 94 (12 MHz). LED0–3 pins 1–4. BTN1 pin 31 activo en BAJO = reset.
+// TX pin 56 → FT2232H canal B. 115200 8N1.
+
+module top_module (
+    input  CLK,
+    input  BTN1,
+    output LED0,
+    output LED1,
+    output LED2,
+    output LED3,
+    output TX
+);
+    reg [31:0] div = 32'd0;
+
+    always @(posedge CLK) begin
+        if (!BTN1)
+            div <= 32'd0;
+        else
+            div <= div + 1'b1;
+    end
+
+    assign LED0 = div[22];
+    assign LED1 = div[23];
+    assign LED2 = div[24];
+    assign LED3 = div[25];
+
+    wire       uart_busy;
+    reg        uart_wr   = 1'b0;
+    reg [7:0]  uart_data = 8'h00;
+    reg [3:0]  msg_idx   = 4'd0;
+    reg [21:0] gap       = 22'd0;
+
+    uart_tx u_tx (
+        .clk (CLK),
+        .wr  (uart_wr),
+        .din (uart_data),
+        .busy(uart_busy),
+        .tx  (TX)
+    );
+
+    always @(posedge CLK) begin
+        uart_wr <= 1'b0;
+        if (!BTN1) begin
+            msg_idx <= 4'd0;
+            gap     <= 22'd0;
+        end else if (gap != 22'd0) begin
+            gap <= gap - 1'b1;
+        end else if (!uart_busy && !uart_wr) begin
+            case (msg_idx)
+                4'd0:  uart_data <= "H";
+                4'd1:  uart_data <= "o";
+                4'd2:  uart_data <= "l";
+                4'd3:  uart_data <= "a";
+                4'd4:  uart_data <= " ";
+                4'd5:  uart_data <= "U";
+                4'd6:  uart_data <= "A";
+                4'd7:  uart_data <= "R";
+                4'd8:  uart_data <= "T";
+                4'd9:  uart_data <= 8'h0D;
+                default: uart_data <= 8'h0A;
+            endcase
+            uart_wr <= 1'b1;
+            if (msg_idx == 4'd10) begin
+                msg_idx <= 4'd0;
+                gap     <= 22'd3_000_000;
+            end else begin
+                msg_idx <= msg_idx + 1'b1;
+            end
+        end
+    end
+endmodule
+`
+
+export const CUSTOM_VERILOG = `// Custom board — skeleton. Match CLK / BTN1 / LED0 / TX to your PCF.
+// If you use UART, the PCF must define TX (and RX if you read). Clock too.
+
+module top_module (
+    input  CLK,
+    input  BTN1,
+    output LED0,
+    output LED1,
+    output LED2,
+    output LED3,
+    output TX
+);
+    reg [31:0] div = 32'd0;
+
+    always @(posedge CLK) begin
+        if (!BTN1)
+            div <= 32'd0;
+        else
+            div <= div + 1'b1;
+    end
+
+    assign LED0 = div[22];
+    assign LED1 = div[23];
+    assign LED2 = div[24];
+    assign LED3 = div[25];
+
+    wire       uart_busy;
+    reg        uart_wr   = 1'b0;
+    reg [7:0]  uart_data = 8'h00;
+    reg [3:0]  msg_idx   = 4'd0;
+    reg [21:0] gap       = 22'd0;
+
+    uart_tx u_tx (
+        .clk (CLK),
+        .wr  (uart_wr),
+        .din (uart_data),
+        .busy(uart_busy),
+        .tx  (TX)
+    );
+
+    always @(posedge CLK) begin
+        uart_wr <= 1'b0;
+        if (!BTN1) begin
+            msg_idx <= 4'd0;
+            gap     <= 22'd0;
+        end else if (gap != 22'd0) begin
+            gap <= gap - 1'b1;
+        end else if (!uart_busy && !uart_wr) begin
+            case (msg_idx)
+                4'd0:  uart_data <= "H";
+                4'd1:  uart_data <= "o";
+                4'd2:  uart_data <= "l";
+                4'd3:  uart_data <= "a";
+                4'd4:  uart_data <= " ";
+                4'd5:  uart_data <= "U";
+                4'd6:  uart_data <= "A";
+                4'd7:  uart_data <= "R";
+                4'd8:  uart_data <= "T";
+                4'd9:  uart_data <= 8'h0D;
+                default: uart_data <= 8'h0A;
+            endcase
+            uart_wr <= 1'b1;
+            if (msg_idx == 4'd10) begin
+                msg_idx <= 4'd0;
+                gap     <= 22'd3_000_000;
+            end else begin
+                msg_idx <= msg_idx + 1'b1;
+            end
+        end
+    end
+endmodule
+`
+
+export type BoardStarter = { top: string; files: FpgaFile[] }
+
+function pack(verilog: string): BoardStarter {
+  return {
+    top: BLINKY_TOP,
+    files: [
+      { name: 'top_module.v', open: true, content: verilog },
+      { name: 'uart_tx.v', open: true, content: UART_TX_VERILOG },
+    ],
+  }
+}
+
+export const AZUKAR_STARTER: BoardStarter = pack(AZUKAR_VERILOG)
+export const EDU_CIAA_STARTER: BoardStarter = pack(EDU_CIAA_VERILOG)
+export const CUSTOM_STARTER: BoardStarter = pack(CUSTOM_VERILOG)
+
+/** Azukar default — existing tests and first paint. */
+export const BLINKY_VERILOG = AZUKAR_VERILOG
+export const FPGA_STARTER: FpgaFile[] = AZUKAR_STARTER.files
+
+export function starterForBoard(id: string): BoardStarter {
+  if (isCustomBoardId(id)) return CUSTOM_STARTER
+  switch (id) {
+    case 'edu-ciaa-fpga':
+      return EDU_CIAA_STARTER
+    case 'azukar-v2':
+      return AZUKAR_STARTER
+    default:
+      return AZUKAR_STARTER
+  }
+}
+
+export function cloneStarterFiles(starter: BoardStarter): FpgaFile[] {
+  return starter.files.map((f) => ({ ...f }))
+}
+
+export function filesMatchStarter(files: FpgaFile[], starter: BoardStarter): boolean {
+  if (files.length !== starter.files.length) return false
+  const have = new Map(files.map((f) => [f.name, f.content]))
+  return starter.files.every((f) => have.get(f.name) === f.content)
+}

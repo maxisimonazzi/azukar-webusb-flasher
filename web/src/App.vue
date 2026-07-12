@@ -4,7 +4,24 @@ import { useI18n } from 'vue-i18n'
 
 import VerilogEditor from '@/components/VerilogEditor.vue'
 import AppButton from '@/components/ui/AppButton.vue'
-import { compileFpga } from '@/fpga/compile'
+import BoardHelpModal from '@/components/BoardHelpModal.vue'
+import BoardSelector from '@/components/BoardSelector.vue'
+import CustomBoardModal from '@/components/CustomBoardModal.vue'
+import { setActiveBoard } from '@/fpga/activeBoard'
+import {
+  customBoardProfiles,
+  LISTED_BOARDS,
+  loadBoardId,
+  resolveBoard,
+} from '@/fpga/boardCatalog'
+import {
+  addCustomBoard,
+  emptyCustomDraft,
+  saveBoardId,
+  type BoardProfile,
+  type CustomBoardDraft,
+} from '@/fpga/boardTypes'
+import { compileFpga, type CompileBoard } from '@/fpga/compile'
 import {
   addFpgaFile,
   binDownloadName,
@@ -14,7 +31,6 @@ import {
   openFpgaTab,
   renameFpgaFile,
   visibleFpgaTabs,
-  type FpgaFile,
 } from '@/fpga/files'
 import { FLASH_CONSOLE_BYTES, formatHexDump, toIntelHex } from '@/fpga/flashDump'
 import { trimIce40Image } from '@/fpga/flashPlan'
@@ -30,7 +46,7 @@ import {
   readIce40Flash,
   resetIce40FromFlash,
 } from '@/fpga/programmer'
-import { BLINKY_TOP, FPGA_STARTER } from '@/fpga/starter'
+import { BLINKY_TOP, cloneStarterFiles, filesMatchStarter, starterForBoard } from '@/fpga/starter'
 import {
   UART_BAUD_DEFAULT,
   UART_BAUDS,
@@ -68,9 +84,17 @@ type UploadThen = 'flash' | 'sram'
 const { t, locale } = useI18n()
 
 const isDark = computed(() => themeRef.value === 'dark')
-const files = ref<FpgaFile[]>(FPGA_STARTER.map((f) => ({ ...f })))
-const activeName = ref(FPGA_STARTER[0]?.name ?? 'top_module.v')
-const top = ref(BLINKY_TOP)
+const initialBoard = resolveBoard(loadBoardId())
+setActiveBoard(initialBoard)
+const initialStarter = starterForBoard(initialBoard.id)
+const boardId = ref(initialBoard.id)
+const customBoards = ref(customBoardProfiles())
+const customDraft = ref<CustomBoardDraft>(emptyCustomDraft())
+const helpBoard = ref<BoardProfile | null>(null)
+const showCustomModal = ref(false)
+const files = ref(cloneStarterFiles(initialStarter))
+const activeName = ref(initialStarter.files[0]?.name ?? 'top_module.v')
+const top = ref(initialStarter.top)
 const bin = shallowRef<Uint8Array | null>(null)
 const logText = ref('')
 const busyCompile = ref(false)
@@ -393,6 +417,81 @@ function setBin(next: Uint8Array) {
   binObjectUrl.value = URL.createObjectURL(new Blob([next], { type: 'application/octet-stream' }))
 }
 
+function clearBin() {
+  bin.value = null
+  compileBinLink.value = null
+  if (binObjectUrl.value) {
+    URL.revokeObjectURL(binObjectUrl.value)
+    binObjectUrl.value = null
+  }
+}
+
+function activeProfile(): BoardProfile {
+  return resolveBoard(boardId.value)
+}
+
+function compileBoardPayload(): CompileBoard | null {
+  const board = activeProfile()
+  switch (board.kind) {
+    case 'custom':
+      if (!board.pcfText.trim()) return null
+      return {
+        kind: 'custom',
+        device: board.fpga.nextpnr_device,
+        package: board.fpga.nextpnr_package,
+        pcf: board.pcfText,
+      }
+    case 'listed':
+      return { kind: 'listed', id: board.id }
+    default: {
+      const _exhaustive: never = board.kind
+      return _exhaustive
+    }
+  }
+}
+
+function applyBoard(id: string) {
+  const prev = activeProfile()
+  const next = resolveBoard(id)
+  const keep = filesMatchStarter(files.value, starterForBoard(prev.id))
+  boardId.value = next.id
+  saveBoardId(next.id)
+  setActiveBoard(next)
+  clearBin()
+  if (keep) {
+    const starter = starterForBoard(next.id)
+    files.value = cloneStarterFiles(starter)
+    activeName.value = starter.files[0]?.name ?? 'top_module.v'
+    top.value = starter.top
+  } else {
+    appendLog(t('board.keptFiles', { name: next.title }))
+  }
+}
+
+function onBoardSelect(id: string) {
+  if (id === boardId.value) return
+  applyBoard(id)
+}
+
+function onBoardHelp(id: string) {
+  helpBoard.value = resolveBoard(id)
+}
+
+function openCustomModal() {
+  customDraft.value = emptyCustomDraft()
+  showCustomModal.value = true
+}
+
+function onCustomSave(draft: CustomBoardDraft) {
+  const stored = addCustomBoard({
+    ...draft,
+    title: draft.title.trim() || t('board.untitled', { n: customBoards.value.length + 1 }),
+  })
+  customBoards.value = customBoardProfiles()
+  showCustomModal.value = false
+  applyBoard(stored.id)
+}
+
 function clipLog(text: string, maxChars = 40_000): string {
   if (text.length <= maxChars) return text
   return `${t('fpga.logTrimmed', { n: maxChars })}\n${text.slice(-maxChars)}`
@@ -456,12 +555,19 @@ function progressPhrase(phase: string): string {
 async function onCompile() {
   showNoBin.value = false
   if (busyCompile.value) return
+  const payload = compileBoardPayload()
+  if (!payload) {
+    appendLog(t('board.needPcf'))
+    showCustomModal.value = true
+    return
+  }
   busyCompile.value = true
   appendLog(t('fpga.compileQueued'))
   try {
     const result = await compileFpga(
       files.value.map((f) => ({ name: f.name, content: f.content })),
       top.value.trim() || BLINKY_TOP,
+      payload,
     )
     if (result.log) appendLog(clipLog(result.log))
     if (result.status === 'success' && result.bin) {
@@ -766,6 +872,14 @@ onBeforeUnmount(() => {
         <h1 class="text-sm font-semibold tracking-wide text-fg">{{ t('app.title') }}</h1>
       </div>
       <div class="flex items-center gap-2">
+        <BoardSelector
+          :model-value="boardId"
+          :listed="LISTED_BOARDS"
+          :customs="customBoards"
+          @update:model-value="onBoardSelect"
+          @help="onBoardHelp"
+          @custom="openCustomModal"
+        />
         <div
           class="inline-flex items-center gap-0.5 rounded-lg border border-border bg-surface-2/60 p-0.5"
           role="group"
@@ -1280,5 +1394,12 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+    <BoardHelpModal :board="helpBoard" @close="helpBoard = null" />
+    <CustomBoardModal
+      :open="showCustomModal"
+      :initial="customDraft"
+      @save="onCustomSave"
+      @close="showCustomModal = false"
+    />
   </div>
 </template>

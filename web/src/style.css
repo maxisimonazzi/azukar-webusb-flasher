@@ -145,3 +145,17 @@
     overflow: hidden;
   }
 }
+
+@keyframes modal-nudge {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.03);
+  }
+}
+
+.modal-nudge {
+  animation: modal-nudge 220ms ease-out;
+}

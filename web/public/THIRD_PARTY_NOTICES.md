@@ -14,4 +14,4 @@ Fonts and FPGA tools bundled or used at runtime.
 
 OFL copies: `web/public/fonts/`.
 
-This app: MIT (`LICENSE`). `boards/azukar-v2/pins.pcf`: CERN OHL-P.
+This app: MIT (`LICENSE`). `boards/azukar-v2/pins.pcf`: CERN OHL-P. `boards/edu-ciaa-fpga/pins.pcf`: GPL (FPGAwars/apio-examples).

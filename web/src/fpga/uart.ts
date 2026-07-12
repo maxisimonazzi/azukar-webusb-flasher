@@ -1,12 +1,18 @@
 /** WebSerial on FTDI channel B. Channel A (WebUSB/MPSSE) stays untouched. */
 
+import { getActivePid, getActiveVid } from '@/fpga/activeBoard'
+
 export const UART_BAUDS = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600] as const
 export type UartBaud = (typeof UART_BAUDS)[number]
 export const UART_BAUD_DEFAULT: UartBaud = 115200
 export const UART_TEXT_MAX = 80_000
 
-/** Same FT2232H as boards/azukar-v2/board.json (vid 1027, pid 24592). */
+/** Same FT2232H as the active board (default 0x0403 / 0x6010). */
 export const UART_SERIAL_FILTERS = [{ usbVendorId: 0x0403, usbProductId: 0x6010 }]
+
+export function uartSerialFilters(): { usbVendorId: number; usbProductId: number }[] {
+  return [{ usbVendorId: getActiveVid(), usbProductId: getActivePid() }]
+}
 
 export function clipUartText(text: string, max = UART_TEXT_MAX): string {
   if (text.length <= max) return text
@@ -37,7 +43,7 @@ export async function openUartSession(opts: {
   if (!hasWebSerial()) {
     throw new Error('NEED_WEB_SERIAL')
   }
-  const port = await navigator.serial!.requestPort({ filters: UART_SERIAL_FILTERS })
+  const port = await navigator.serial!.requestPort({ filters: uartSerialFilters() })
   await port.open({
     baudRate: opts.baudRate,
     dataBits: 8,

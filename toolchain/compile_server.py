@@ -27,20 +27,26 @@ BOARDS_ROOT = Path(os.environ.get("BOARDS_DIR", "/boards"))
 BIND = os.environ.get("COMPILE_BIND", "0.0.0.0")
 PORT = int(os.environ.get("COMPILE_PORT", "8090"))
 TIMEOUT_SEC = int(os.environ.get("COMPILE_TIMEOUT_SEC", "90"))
-MAX_BODY = 256 * 1024
+MAX_BODY = 320 * 1024
 MAX_FILES = 100
 MAX_CHARS = 80_000
 MAX_FILE_CHARS = 20_000
+MAX_PCF_CHARS = 40_000
 
 TOP_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 FILE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.v$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
+BOARD_ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
 
 _lock = threading.Lock()
 
 
-def _load_board() -> dict:
-    path = BOARDS_ROOT / BOARD / "board.json"
+def _load_listed_board(board_id: str) -> dict:
+    if not BOARD_ID_RE.fullmatch(board_id) or board_id == "custom":
+        raise ValueError("board")
+    path = BOARDS_ROOT / board_id / "board.json"
+    if not path.is_file():
+        raise FileNotFoundError(path)
     data = json.loads(path.read_text(encoding="utf-8"))
     device = str(data["fpga"]["nextpnr_device"])
     package = str(data["fpga"]["nextpnr_package"])
@@ -49,10 +55,43 @@ def _load_board() -> dict:
         raise ValueError("board.json nextpnr fields look unsafe")
     if pcf_name != Path(pcf_name).name or not pcf_name.endswith(".pcf"):
         raise ValueError("board.json pcf looks unsafe")
-    pcf = BOARDS_ROOT / BOARD / pcf_name
+    pcf = BOARDS_ROOT / board_id / pcf_name
     if not pcf.is_file():
         raise FileNotFoundError(pcf)
-    return {"device": device, "package": package, "pcf": pcf}
+    return {
+        "id": board_id,
+        "device": device,
+        "package": package,
+        "pcf_text": pcf.read_text(encoding="utf-8"),
+    }
+
+
+def _load_custom_board(payload: dict) -> dict:
+    device = payload.get("device")
+    package = payload.get("package")
+    pcf_text = payload.get("pcf")
+    if not isinstance(device, str) or not TOKEN_RE.fullmatch(device):
+        raise ValueError("device")
+    if not isinstance(package, str) or not TOKEN_RE.fullmatch(package):
+        raise ValueError("package")
+    if not isinstance(pcf_text, str) or not pcf_text.strip() or len(pcf_text) > MAX_PCF_CHARS:
+        raise ValueError("pcf")
+    return {
+        "id": "custom",
+        "device": device,
+        "package": package,
+        "pcf_text": pcf_text,
+    }
+
+
+def _resolve_board(payload: dict) -> dict:
+    raw = payload.get("board", BOARD)
+    if not isinstance(raw, str):
+        raise ValueError("board")
+    board_id = raw.strip() or BOARD
+    if board_id == "custom":
+        return _load_custom_board(payload)
+    return _load_listed_board(board_id)
 
 
 def _parse_files(raw: object) -> list[tuple[str, str]]:
@@ -80,8 +119,7 @@ def _parse_files(raw: object) -> list[tuple[str, str]]:
     return out
 
 
-def _run_compile(top: str, files: list[tuple[str, str]]) -> dict:
-    board = _load_board()
+def _run_compile(top: str, files: list[tuple[str, str]], board: dict) -> dict:
     names = [name for name, _ in files]
     yosys = [
         "yosys",
@@ -110,9 +148,7 @@ def _run_compile(top: str, files: list[tuple[str, str]]) -> dict:
         work = Path(tmp)
         for name, content in files:
             (work / name).write_text(content, encoding="utf-8", newline="\n")
-        (work / "pins.pcf").write_text(
-            board["pcf"].read_text(encoding="utf-8"), encoding="utf-8", newline="\n"
-        )
+        (work / "pins.pcf").write_text(board["pcf_text"], encoding="utf-8", newline="\n")
 
         log_parts: list[str] = []
         for title, cmd in (
@@ -209,12 +245,17 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             self._send(400, {"error": "files"})
             return
+        try:
+            board = _resolve_board(payload)
+        except (ValueError, FileNotFoundError, OSError, KeyError, json.JSONDecodeError) as exc:
+            self._send(400, {"error": "board", "detail": str(exc)})
+            return
 
         if not _lock.acquire(blocking=False):
             self._send(409, {"error": "busy"})
             return
         try:
-            result = _run_compile(top.strip(), files)
+            result = _run_compile(top.strip(), files, board)
         except Exception as exc:  # noqa: BLE001 — surface to the log pane
             result = {"status": "compile_error", "log": f"compile server: {exc}", "bin_b64": None}
         finally:

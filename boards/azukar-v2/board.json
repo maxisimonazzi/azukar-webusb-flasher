@@ -19,5 +19,13 @@
       "cdone": 6,
       "creset": 7
     }
+  },
+  "help": {
+    "fpgaLabel": "iCE40-HX8K (nextpnr hx8k / tq144:4k)",
+    "pinoutUrl": "https://github.com/maxisimonazzi/Azukar-FPGA/blob/main/docs/pinout/Pinout%20Azukar%20v2.png",
+    "repoUrl": "https://github.com/maxisimonazzi/Azukar-FPGA",
+    "siteUrl": "https://www.azukar.com.ar",
+    "clock": "CLK12 pin 49, 12 MHz (CLK100 pin 129)",
+    "uart": "TX pin 63, RX pin 64"
   }
 }
