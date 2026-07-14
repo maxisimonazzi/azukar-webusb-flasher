@@ -8,10 +8,10 @@
     <script>
       (function () {
         try {
-          var t = localStorage.getItem('azukar.theme')
+          var t = localStorage.getItem('lattice.theme') || localStorage.getItem('azukar.theme')
           if (t !== 'light' && t !== 'dark') t = 'dark'
           if (t === 'dark') document.documentElement.classList.add('dark')
-          var l = localStorage.getItem('azukar.locale')
+          var l = localStorage.getItem('lattice.locale') || localStorage.getItem('azukar.locale')
           if (l === 'en' || l === 'es') document.documentElement.lang = l
         } catch (e) {
           document.documentElement.classList.add('dark')

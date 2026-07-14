@@ -1,8 +1,10 @@
+import { readLocal, writeLocal } from '@/lib/storage'
+
 import type { AppLocale } from './types'
 import { LOCALE_KEY } from './types'
 
 export function readStoredLocale(): AppLocale | null {
-  const value = localStorage.getItem(LOCALE_KEY)
+  const value = readLocal(LOCALE_KEY)
   return value === 'en' || value === 'es' ? value : null
 }
 
@@ -16,7 +18,7 @@ export function resolveLocale(): AppLocale {
 }
 
 export function writeLocale(locale: AppLocale): void {
-  localStorage.setItem(LOCALE_KEY, locale)
+  writeLocal(LOCALE_KEY, locale)
 }
 
 export function setLocalePreference(locale: AppLocale): void {

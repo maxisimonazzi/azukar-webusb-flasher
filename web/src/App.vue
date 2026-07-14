@@ -58,11 +58,12 @@ import {
 import { classifyUsbError, usbBannerKey } from '@/fpga/usbErrors'
 import { verilogFilesFromZip, verilogFilesToZip } from '@/fpga/zipVerilog'
 import { isFirefox, WEBSERIAL_FIREFOX_ADDON_URL } from '@/lib/isFirefox'
+import { readSession, writeSession } from '@/lib/storage'
 import {
-  EDITOR_FONT_DEFAULT,
   EDITOR_FONT_MAX,
   EDITOR_FONT_MIN,
-  clampEditorFontSize,
+  editorFontSizeRef,
+  setEditorFontSizePreference,
 } from '@/prefs/editorFont'
 import { setLocalePreference } from '@/prefs/locale'
 import { beginThemeTransition, setThemePreference, themeRef } from '@/prefs/theme'
@@ -124,7 +125,7 @@ const uartBaud = ref<(typeof UART_BAUDS)[number]>(UART_BAUD_DEFAULT)
 let uartSession: UartSession | null = null
 const uartPending: string[] = []
 let uartRaf: number | null = null
-const editorFontPx = ref(EDITOR_FONT_DEFAULT)
+const editorFontPx = editorFontSizeRef
 const binObjectUrl = ref<string | null>(null)
 let stopConnectionWatch: (() => void) | null = null
 let logRaf: number | null = null
@@ -194,7 +195,7 @@ function localeBtnClass(code: AppLocale): string {
 function dismissFirefoxNotice() {
   showFirefoxNotice.value = false
   try {
-    sessionStorage.setItem(FIREFOX_NOTICE_KEY, '1')
+    writeSession(FIREFOX_NOTICE_KEY, '1')
   } catch {
     /* private mode */
   }
@@ -208,7 +209,7 @@ function onLocale(next: AppLocale) {
 }
 
 function bumpFont(delta: number) {
-  editorFontPx.value = clampEditorFontSize(editorFontPx.value + delta)
+  setEditorFontSizePreference(editorFontPx.value + delta)
 }
 
 function setActiveContent(content: string) {
@@ -846,7 +847,7 @@ onMounted(() => {
   document.addEventListener('pointerdown', onPointerDownAway)
   if (!isFirefox()) return
   try {
-    if (sessionStorage.getItem(FIREFOX_NOTICE_KEY) === '1') return
+    if (readSession(FIREFOX_NOTICE_KEY) === '1') return
   } catch {
     /* private mode: show once this load */
   }

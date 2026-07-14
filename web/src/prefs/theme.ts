@@ -1,12 +1,14 @@
 import { ref } from 'vue'
 
+import { readLocal, writeLocal } from '@/lib/storage'
+
 import type { AppTheme } from './types'
 import { THEME_KEY } from './types'
 
 export const themeRef = ref<AppTheme>('dark')
 
 export function readStoredTheme(): AppTheme | null {
-  const value = localStorage.getItem(THEME_KEY)
+  const value = readLocal(THEME_KEY)
   return value === 'light' || value === 'dark' ? value : null
 }
 
@@ -20,7 +22,7 @@ export function applyTheme(theme: AppTheme): void {
 }
 
 export function writeTheme(theme: AppTheme): void {
-  localStorage.setItem(THEME_KEY, theme)
+  writeLocal(THEME_KEY, theme)
 }
 
 export function beginThemeTransition(): void {

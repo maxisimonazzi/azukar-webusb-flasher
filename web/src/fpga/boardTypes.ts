@@ -1,10 +1,12 @@
 /** Shared board types and PCF helpers. No Vite glob — Node tests can import this. */
 
+import { readLocal, removeLocal, writeLocal } from '@/lib/storage'
+
 export const CUSTOM_BOARD_ID = 'custom'
 export const DEFAULT_BOARD_ID = 'azukar-v2'
-export const BOARD_ID_KEY = 'azukar.boardId'
-export const CUSTOM_BOARD_KEY = 'azukar.customBoard'
-export const CUSTOM_BOARDS_KEY = 'azukar.customBoards'
+export const BOARD_ID_KEY = 'boardId'
+export const CUSTOM_BOARD_KEY = 'customBoard'
+export const CUSTOM_BOARDS_KEY = 'customBoards'
 
 export const EXAMPLE_CUSTOM_PCF = `# Ejemplo de como mapear los pines de tu placa con su variable.
 # Modifica con los valores adecuados para tu placa.
@@ -253,19 +255,11 @@ export function customDraftToProfile(
 }
 
 function readStore(key: string): string | null {
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
+  return readLocal(key)
 }
 
 function writeStore(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value)
-  } catch {
-    /* private mode */
-  }
+  writeLocal(key, value)
 }
 
 function parseCustomDraft(raw: unknown): CustomBoardDraft | null {
@@ -330,6 +324,7 @@ export function loadCustomBoards(): StoredCustomBoard[] {
     if (legacy) {
       const migrated: StoredCustomBoard = { ...legacy, id: 'custom-1' }
       writeStore(CUSTOM_BOARDS_KEY, JSON.stringify([migrated]))
+      removeLocal(CUSTOM_BOARD_KEY)
       return [migrated]
     }
   }

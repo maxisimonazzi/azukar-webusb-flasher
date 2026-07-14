@@ -9,3 +9,4 @@ Thumbs.db
 web/node_modules/
 web/dist/
 *.tsbuildinfo
+__pycache__/
