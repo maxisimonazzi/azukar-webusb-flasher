@@ -1,0 +1,96 @@
+/** Same limits and argv as toolchain/compile_server.py — used by the browser worker. */
+
+import { FPGA_IDENT_RE, FPGA_NAME_RE } from '@/fpga/files'
+
+export const MAX_FILES = 100
+export const MAX_CHARS = 80_000
+export const MAX_FILE_CHARS = 20_000
+export const MAX_PCF_CHARS = 40_000
+
+export const TOKEN_RE = /^[A-Za-z0-9_.:-]+$/
+
+export type CompileFile = { name: string; content: string }
+
+export type CompileBoard = {
+  device: string
+  package: string
+  pcf: string
+}
+
+export type CompileJob = {
+  yosysArgs: string[]
+  nextpnrArgs: string[]
+  icepackArgs: string[]
+  files: Record<string, string>
+}
+
+export type CompileTree = { [name: string]: CompileTree | string | Uint8Array }
+
+function fail(code: 'COMPILE_TOO_LARGE' | 'COMPILE_BAD_INPUT'): never {
+  throw new Error(code)
+}
+
+export function buildCompileJob(
+  files: CompileFile[],
+  top: string,
+  board: CompileBoard,
+): CompileJob {
+  const topName = top.trim()
+  if (!FPGA_IDENT_RE.test(topName)) fail('COMPILE_BAD_INPUT')
+  if (!TOKEN_RE.test(board.device) || !TOKEN_RE.test(board.package)) fail('COMPILE_BAD_INPUT')
+  const pcf = board.pcf
+  if (!pcf.trim() || pcf.length > MAX_PCF_CHARS) fail('COMPILE_BAD_INPUT')
+  if (!files.length || files.length > MAX_FILES) fail('COMPILE_TOO_LARGE')
+
+  const names: string[] = []
+  const tree: Record<string, string> = { 'pins.pcf': pcf }
+  let total = 0
+  const seen = new Set<string>()
+  for (const file of files) {
+    if (!FPGA_NAME_RE.test(file.name)) fail('COMPILE_BAD_INPUT')
+    if (file.content.length > MAX_FILE_CHARS) fail('COMPILE_TOO_LARGE')
+    if (seen.has(file.name)) fail('COMPILE_BAD_INPUT')
+    seen.add(file.name)
+    total += file.content.length
+    if (total > MAX_CHARS) fail('COMPILE_TOO_LARGE')
+    names.push(file.name)
+    tree[file.name] = file.content
+  }
+
+  return {
+    yosysArgs: ['-Q', '-p', `synth_ice40 -top ${topName} -json out.json`, ...names],
+    nextpnrArgs: [
+      `--${board.device}`,
+      '--package',
+      board.package,
+      '--json',
+      'out.json',
+      '--asc',
+      'out.asc',
+      '--pcf',
+      'pins.pcf',
+      '--report',
+      'out.pnr',
+    ],
+    icepackArgs: ['out.asc', 'out.bin'],
+    files: tree,
+  }
+}
+
+export function extractTreeFile(tree: CompileTree, name: string): Uint8Array | null {
+  const value = tree[name]
+  if (value instanceof Uint8Array) return value
+  if (typeof value === 'string') {
+    const out = new Uint8Array(value.length)
+    for (let i = 0; i < value.length; i++) out[i] = value.charCodeAt(i) & 0xff
+    return out
+  }
+  return null
+}
+
+export function extractTreeText(tree: CompileTree, name: string): string | null {
+  const value = tree[name]
+  if (typeof value === 'string') return value
+  if (value instanceof Uint8Array) return new TextDecoder().decode(value)
+  return null
+}

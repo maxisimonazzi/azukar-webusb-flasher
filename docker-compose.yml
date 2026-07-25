@@ -1,12 +1,10 @@
-# Producción local y VPS: un solo comando.
+# Un compose, un código. COMPILE_BACKEND en .env elige server vs yowasp (build).
+#   copy .env.example .env
 #   docker compose up --build -d
-# Abrí http://localhost:8080 en Chrome o Edge (WebUSB no vive en Firefox).
 #
-# toolchain  = Yosys + nextpnr-ice40 + icepack + HTTP /compile (stdlib).
-# web        = SPA + nginx. El USB lo habla el navegador de ESTA máquina,
-#              nunca el contenedor. nginx proxea /compile → toolchain.
+# Proyecto Docker: lattice-yowasp-* (no pisa lattice-webusb-flasher-* en :8080).
 
-name: lattice-webusb-flasher
+name: lattice-yowasp
 
 services:
   toolchain:
@@ -33,8 +31,10 @@ services:
     build:
       context: .
       dockerfile: web/Dockerfile
+      args:
+        VITE_COMPILE_BACKEND: ${COMPILE_BACKEND:-yowasp}
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "${WEB_PORT:-9090}:80"
     depends_on:
       - toolchain

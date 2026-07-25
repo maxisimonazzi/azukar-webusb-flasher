@@ -21,7 +21,7 @@ import {
   type BoardProfile,
   type CustomBoardDraft,
 } from '@/fpga/boardTypes'
-import { compileFpga, type CompileBoard } from '@/fpga/compile'
+import { compileBackend, compileFpga, type CompileBoard } from '@/fpga/compile'
 import {
   addFpgaFile,
   binDownloadName,
@@ -433,21 +433,11 @@ function activeProfile(): BoardProfile {
 
 function compileBoardPayload(): CompileBoard | null {
   const board = activeProfile()
-  switch (board.kind) {
-    case 'custom':
-      if (!board.pcfText.trim()) return null
-      return {
-        kind: 'custom',
-        device: board.fpga.nextpnr_device,
-        package: board.fpga.nextpnr_package,
-        pcf: board.pcfText,
-      }
-    case 'listed':
-      return { kind: 'listed', id: board.id }
-    default: {
-      const _exhaustive: never = board.kind
-      return _exhaustive
-    }
+  if (!board.pcfText.trim()) return null
+  return {
+    device: board.fpga.nextpnr_device,
+    package: board.fpga.nextpnr_package,
+    pcf: board.pcfText,
   }
 }
 
@@ -493,16 +483,16 @@ function onCustomSave(draft: CustomBoardDraft) {
   applyBoard(stored.id)
 }
 
-function clipLog(text: string, maxChars = 40_000): string {
-  if (text.length <= maxChars) return text
-  return `${t('fpga.logTrimmed', { n: maxChars })}\n${text.slice(-maxChars)}`
-}
-
-type CompileFailCode = 'COMPILE_BUSY' | 'COMPILE_TOO_LARGE'
+type CompileFailCode = 'COMPILE_BUSY' | 'COMPILE_TOO_LARGE' | 'COMPILE_BAD_INPUT' | 'COMPILE_WORKER'
 type UartFailCode = 'NEED_WEB_SERIAL' | 'UART_NO_READABLE'
 
 function isCompileFailCode(msg: string): msg is CompileFailCode {
-  return msg === 'COMPILE_BUSY' || msg === 'COMPILE_TOO_LARGE'
+  return (
+    msg === 'COMPILE_BUSY' ||
+    msg === 'COMPILE_TOO_LARGE' ||
+    msg === 'COMPILE_BAD_INPUT' ||
+    msg === 'COMPILE_WORKER'
+  )
 }
 
 function isUartFailCode(msg: string): msg is UartFailCode {
@@ -517,6 +507,10 @@ function compileErrorMessage(err: unknown): string {
       return t('fpga.compileBusy')
     case 'COMPILE_TOO_LARGE':
       return t('fpga.compileTooLarge')
+    case 'COMPILE_BAD_INPUT':
+      return t('fpga.compileBadInput')
+    case 'COMPILE_WORKER':
+      return t('fpga.compileWorker')
     default: {
       const _exhaustive: never = msg
       return _exhaustive
@@ -563,14 +557,16 @@ async function onCompile() {
     return
   }
   busyCompile.value = true
-  appendLog(t('fpga.compileQueued'))
+  appendLog(
+    compileBackend() === 'yowasp' ? t('fpga.compileQueuedBrowser') : t('fpga.compileQueuedServer'),
+  )
   try {
     const result = await compileFpga(
       files.value.map((f) => ({ name: f.name, content: f.content })),
       top.value.trim() || BLINKY_TOP,
       payload,
+      (line) => appendLog(line),
     )
-    if (result.log) appendLog(clipLog(result.log))
     if (result.status === 'success' && result.bin) {
       setBin(result.bin)
       appendLog(t('fpga.binReady', { n: result.bin.length }))

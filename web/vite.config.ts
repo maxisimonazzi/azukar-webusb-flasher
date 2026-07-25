@@ -9,6 +9,10 @@ const root = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
+  worker: { format: 'es' },
+  optimizeDeps: {
+    exclude: ['@yowasp/yosys', '@yowasp/nextpnr-ice40'],
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

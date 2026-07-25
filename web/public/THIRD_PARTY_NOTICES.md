@@ -6,9 +6,9 @@ Fonts and FPGA tools bundled or used at runtime.
 |-------|---------|-----|
 | Inter (`@fontsource/inter`) | OFL | UI sans |
 | JetBrains Mono (`@fontsource/jetbrains-mono`) | OFL | Editor / logs |
-| Yosys (Debian) | ISC | Synthesis (`synth_ice40`) |
-| nextpnr-ice40 (Debian) | ISC | Place & route iCE40 |
-| Project IceStorm / `icepack` (`fpga-icestorm`) | ISC | Pack `.asc` → `.bin` |
+| Yosys (YoWASP `@yowasp/yosys` 0.68.1207) | ISC | Synthesis (`synth_ice40`) in the browser |
+| nextpnr-ice40 + icepack (YoWASP `@yowasp/nextpnr-ice40` 0.11.825) | ISC | Place & route / pack in the browser |
+| Yosys / nextpnr / IceStorm (Debian, stack viejo en :8080) | ISC | Síntesis en el contenedor, otro compose |
 | Vue, Vite, Tailwind, CodeMirror | MIT | SPA |
 | Caddy (opcional, VPS) | Apache-2.0 | Reverse proxy + Let’s Encrypt |
 

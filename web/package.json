@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "test": "node --experimental-strip-types --test src/lib/verilogEditor.test.ts src/lib/isFirefox.test.ts src/lib/storage.test.ts src/fpga/flashPlan.test.ts src/fpga/iceprogPins.test.ts src/fpga/flashDump.test.ts src/fpga/ftdiUsb.test.ts src/fpga/files.test.ts src/fpga/zipVerilog.test.ts src/fpga/uart.test.ts src/fpga/starter.test.ts src/fpga/usbErrors.test.ts src/fpga/boardTypes.test.ts"
+    "test": "node --experimental-strip-types --test src/lib/verilogEditor.test.ts src/lib/isFirefox.test.ts src/lib/storage.test.ts src/fpga/flashPlan.test.ts src/fpga/iceprogPins.test.ts src/fpga/flashDump.test.ts src/fpga/ftdiUsb.test.ts src/fpga/files.test.ts src/fpga/zipVerilog.test.ts src/fpga/uart.test.ts src/fpga/starter.test.ts src/fpga/usbErrors.test.ts src/fpga/boardTypes.test.ts src/fpga/compileArgs.test.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",
@@ -17,6 +17,8 @@
     "@fontsource/inter": "^5.3.0",
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@lezer/highlight": "^1.2.3",
+    "@yowasp/nextpnr-ice40": "0.11.825",
+    "@yowasp/yosys": "0.68.1207",
     "codemirror": "^6.0.2",
     "vue": "^3.5.13",
     "vue-i18n": "^11.4.8"

@@ -12,12 +12,16 @@ WORKDIR /src
 COPY web ./web
 COPY boards ./boards
 WORKDIR /src/web
+ARG VITE_COMPILE_BACKEND=yowasp
+ENV VITE_COMPILE_BACKEND=$VITE_COMPILE_BACKEND
 RUN npm run build
 
 FROM nginx:1.27-alpine
 
 COPY web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /src/web/dist /usr/share/nginx/html
+COPY --from=build /src/web/node_modules/@yowasp/yosys /usr/share/nginx/html/yowasp/yosys
+COPY --from=build /src/web/node_modules/@yowasp/nextpnr-ice40 /usr/share/nginx/html/yowasp/nextpnr-ice40
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
