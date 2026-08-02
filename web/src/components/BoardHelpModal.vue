@@ -51,6 +51,8 @@ function blurb(id: string): string {
       return t('board.azukarBlurb')
     case 'edu-ciaa-fpga':
       return t('board.eduCiaaBlurb')
+    case 'alhambra-ii':
+      return t('board.alhambraBlurb')
     default:
       return t('board.genericBlurb')
   }

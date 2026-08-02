@@ -219,6 +219,89 @@ module top_module (
 endmodule
 `
 
+export const ALHAMBRA_VERILOG = `// Alhambra II — contador 4 bit + NOT en SW2 + UART TX.
+// CLK pin 49 (12 MHz). LED0–7 pines 45–37 (PCF FPGAwars). SW1/SW2 34/33, activos en BAJO.
+// TX pin 61 → FT2232H canal B. 115200 8N1.
+
+module top_module (
+    input  CLK,
+    input  SW1,
+    input  SW2,
+    output LED0,
+    output LED1,
+    output LED2,
+    output LED3,
+    output LED4,
+    output LED5,
+    output LED6,
+    output LED7,
+    output TX
+);
+    reg [31:0] div = 32'd0;
+
+    always @(posedge CLK) begin
+        if (!SW1)
+            div <= 32'd0;
+        else
+            div <= div + 1'b1;
+    end
+
+    assign LED0 = div[22];
+    assign LED1 = div[23];
+    assign LED2 = div[24];
+    assign LED3 = div[25];
+    assign LED4 = ~SW2;
+    assign LED5 = ~SW2;
+    assign LED6 = ~SW2;
+    assign LED7 = ~SW2;
+
+    wire       uart_busy;
+    reg        uart_wr   = 1'b0;
+    reg [7:0]  uart_data = 8'h00;
+    reg [3:0]  msg_idx   = 4'd0;
+    reg [21:0] gap       = 22'd0;
+
+    uart_tx u_tx (
+        .clk (CLK),
+        .wr  (uart_wr),
+        .din (uart_data),
+        .busy(uart_busy),
+        .tx  (TX)
+    );
+
+    always @(posedge CLK) begin
+        uart_wr <= 1'b0;
+        if (!SW1) begin
+            msg_idx <= 4'd0;
+            gap     <= 22'd0;
+        end else if (gap != 22'd0) begin
+            gap <= gap - 1'b1;
+        end else if (!uart_busy && !uart_wr) begin
+            case (msg_idx)
+                4'd0:  uart_data <= "H";
+                4'd1:  uart_data <= "o";
+                4'd2:  uart_data <= "l";
+                4'd3:  uart_data <= "a";
+                4'd4:  uart_data <= " ";
+                4'd5:  uart_data <= "U";
+                4'd6:  uart_data <= "A";
+                4'd7:  uart_data <= "R";
+                4'd8:  uart_data <= "T";
+                4'd9:  uart_data <= 8'h0D;
+                default: uart_data <= 8'h0A;
+            endcase
+            uart_wr <= 1'b1;
+            if (msg_idx == 4'd10) begin
+                msg_idx <= 4'd0;
+                gap     <= 22'd3_000_000;
+            end else begin
+                msg_idx <= msg_idx + 1'b1;
+            end
+        end
+    end
+endmodule
+`
+
 export const CUSTOM_VERILOG = `// Custom board — skeleton. Match CLK / BTN1 / LED0 / TX to your PCF.
 // If you use UART, the PCF must define TX (and RX if you read). Clock too.
 
@@ -306,6 +389,7 @@ function pack(verilog: string): BoardStarter {
 
 export const AZUKAR_STARTER: BoardStarter = pack(AZUKAR_VERILOG)
 export const EDU_CIAA_STARTER: BoardStarter = pack(EDU_CIAA_VERILOG)
+export const ALHAMBRA_STARTER: BoardStarter = pack(ALHAMBRA_VERILOG)
 export const CUSTOM_STARTER: BoardStarter = pack(CUSTOM_VERILOG)
 
 /** Azukar default — existing tests and first paint. */
@@ -317,6 +401,8 @@ export function starterForBoard(id: string): BoardStarter {
   switch (id) {
     case 'edu-ciaa-fpga':
       return EDU_CIAA_STARTER
+    case 'alhambra-ii':
+      return ALHAMBRA_STARTER
     case 'azukar-v2':
       return AZUKAR_STARTER
     default:

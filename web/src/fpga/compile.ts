@@ -1,5 +1,6 @@
 import { buildCompileJob, type CompileBoard, type CompileFile } from '@/fpga/compileArgs'
 import type { WorkerIn, WorkerOut } from '@/fpga/compileProtocol'
+import { i18n } from '@/i18n'
 
 export type { CompileBoard, CompileFile }
 
@@ -93,7 +94,7 @@ function compileInBrowser(
           const pct = msg.total > 0 ? Math.min(100, Math.round((msg.done / msg.total) * 100)) : 0
           if (pct !== lastPct && (pct === 100 || pct % 25 === 0)) {
             lastPct = pct
-            onLog?.(`YoWASP ${pct}%`)
+            onLog?.(String(i18n.global.t('fpga.downloadProgress', { pct })))
           }
           return
         }

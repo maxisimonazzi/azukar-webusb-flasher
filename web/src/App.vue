@@ -7,6 +7,7 @@ import AppButton from '@/components/ui/AppButton.vue'
 import BoardHelpModal from '@/components/BoardHelpModal.vue'
 import BoardSelector from '@/components/BoardSelector.vue'
 import CustomBoardModal from '@/components/CustomBoardModal.vue'
+import HelpModal from '@/components/HelpModal.vue'
 import { setActiveBoard } from '@/fpga/activeBoard'
 import {
   customBoardProfiles,
@@ -92,6 +93,7 @@ const boardId = ref(initialBoard.id)
 const customBoards = ref(customBoardProfiles())
 const customDraft = ref<CustomBoardDraft>(emptyCustomDraft())
 const helpBoard = ref<BoardProfile | null>(null)
+const showHelp = ref(false)
 const showCustomModal = ref(false)
 const files = ref(cloneStarterFiles(initialStarter))
 const activeName = ref(initialStarter.files[0]?.name ?? 'top_module.v')
@@ -868,15 +870,18 @@ onBeforeUnmount(() => {
         <img src="/favicon.svg" alt="" class="h-7 w-7" width="28" height="28">
         <h1 class="text-sm font-semibold tracking-wide text-fg">{{ t('app.title') }}</h1>
       </div>
-      <div class="flex items-center gap-2">
-        <BoardSelector
-          :model-value="boardId"
-          :listed="LISTED_BOARDS"
-          :customs="customBoards"
-          @update:model-value="onBoardSelect"
-          @help="onBoardHelp"
-          @custom="openCustomModal"
-        />
+      <div class="flex flex-wrap items-center justify-end gap-2">
+        <label class="flex items-center gap-2 text-xs font-semibold text-muted">
+          <span class="whitespace-nowrap">{{ t('board.pickLabel') }}</span>
+          <BoardSelector
+            :model-value="boardId"
+            :listed="LISTED_BOARDS"
+            :customs="customBoards"
+            @update:model-value="onBoardSelect"
+            @help="onBoardHelp"
+            @custom="openCustomModal"
+          />
+        </label>
         <div
           class="inline-flex items-center gap-0.5 rounded-lg border border-border bg-surface-2/60 p-0.5"
           role="group"
@@ -928,6 +933,14 @@ onBeforeUnmount(() => {
               d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zm0-16a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1zm0 18a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0v-1a1 1 0 0 1 1-1zm10-8a1 1 0 0 1-1 1h-1a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1zM4 12a1 1 0 0 1-1 1H2a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1zm14.95 6.364a1 1 0 0 1 0 1.414l-.707.707a1 1 0 1 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0zM6.464 5.05a1 1 0 0 1 0 1.414l-.707.707A1 1 0 0 1 4.343 5.757l.707-.707a1 1 0 0 1 1.414 0zm12.728 0a1 1 0 0 1-1.414 0l-.707-.707a1 1 0 1 1 1.414-1.414l.707.707a1 1 0 0 1 0 1.414zM6.464 18.95a1 1 0 0 1-1.414 0l-.707-.707a1 1 0 1 1 1.414-1.414l.707.707a1 1 0 0 1 0 1.414z"
             />
           </svg>
+        </button>
+        <button
+          type="button"
+          class="inline-flex h-9 cursor-pointer items-center rounded-lg px-2.5 text-xs font-semibold text-fg transition-colors hover:bg-surface-2"
+          :aria-label="t('app.help')"
+          @click="showHelp = true"
+        >
+          {{ t('app.help') }}
         </button>
       </div>
     </header>
@@ -1332,7 +1345,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <footer class="shrink-0 border-t border-border px-4 py-1.5 text-center text-[0.6875rem] leading-relaxed text-muted">
+    <footer class="shrink-0 border-t border-border px-4 py-1.5 text-center text-[0.8125rem] leading-relaxed text-muted">
       <span>Maximiliano Martin Simonazzi</span>
       <span class="mx-1.5 text-subtle">·</span>
       <a
@@ -1391,6 +1404,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+    <HelpModal :open="showHelp" @close="showHelp = false" />
     <BoardHelpModal :board="helpBoard" @close="helpBoard = null" />
     <CustomBoardModal
       :open="showCustomModal"

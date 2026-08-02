@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { BLINKY_TOP, BLINKY_VERILOG, EDU_CIAA_VERILOG, FPGA_STARTER, UART_TX_VERILOG, starterForBoard } from './starter.ts'
+import { ALHAMBRA_VERILOG, BLINKY_TOP, BLINKY_VERILOG, EDU_CIAA_VERILOG, FPGA_STARTER, UART_TX_VERILOG, starterForBoard } from './starter.ts'
 
 test('starter top is top_module and ships uart_tx as a second file', () => {
   assert.equal(BLINKY_TOP, 'top_module')
@@ -30,4 +30,16 @@ test('EDU-CIAA starter is a 4-bit counter with BTN1 reset and UART', () => {
   assert.doesNotMatch(EDU_CIAA_VERILOG, /BTN0_/)
   assert.match(EDU_CIAA_VERILOG, /if \(!BTN1\)/)
   assert.equal(starter.files[0]?.content, EDU_CIAA_VERILOG)
+})
+
+test('Alhambra II starter is a 4-bit counter, SW1 reset, SW2 NOT on LED4–7, UART', () => {
+  const starter = starterForBoard('alhambra-ii')
+  assert.equal(starter.top, 'top_module')
+  assert.match(ALHAMBRA_VERILOG, /\binput  CLK\b/)
+  assert.match(ALHAMBRA_VERILOG, /\binput  SW1\b/)
+  assert.match(ALHAMBRA_VERILOG, /\binput  SW2\b/)
+  assert.match(ALHAMBRA_VERILOG, /\boutput LED7\b/)
+  assert.match(ALHAMBRA_VERILOG, /if \(!SW1\)/)
+  assert.match(ALHAMBRA_VERILOG, /assign LED4 = ~SW2/)
+  assert.equal(starter.files[0]?.content, ALHAMBRA_VERILOG)
 })

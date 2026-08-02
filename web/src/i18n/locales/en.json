@@ -1,5 +1,6 @@
 {
   "board": {
+    "pickLabel": "Select the board you will use:",
     "group": "Board",
     "help": "Board help",
     "helpNamed": "Help for {name}",
@@ -40,6 +41,7 @@
     "keptFiles": "Switched to {name} but kept your .v files (they were not the previous board’s starter).",
     "azukarBlurb": "iCE40-HX8K, 8 LEDs, 8 active-low buttons, CLK12 at 12 MHz, UART on TX/RX. Programmer is FT2232H channel A, same iceprog map as Alhambra.",
     "eduCiaaBlurb": "iCE40-HX4K (nextpnr hx8k / tq144:4k). 4 LEDs, 4 active-low buttons (BTN1 = pin 31). CLK 12 MHz on pin 94. UART TX pin 56, RX pin 55. ADBUS same as Azukar.",
+    "alhambraBlurb": "iCE40-HX4K (nextpnr hx8k / tq144:4k). 8 LEDs (pins 45–37), SW1/SW2 on 34/33 active-low, CLK 12 MHz on pin 49, UART TX 61 / RX 62. Same iceprog ADBUS as Azukar.",
     "customBlurb": "Profile you built. Compile sends this PCF and device/package. Programming uses the ADBUS map you chose.",
     "genericBlurb": "Listed profile under boards/<id>/. PCF goes to nextpnr; ADBUS goes to the WebUSB programmer."
   },
@@ -54,7 +56,9 @@
     "firefoxBody": "You can still use the lab: edit Verilog, compile, and download the .bin. The programmer (channel A) needs WebUSB, which Firefox does not support. To flash the board, use Chrome or Edge.",
     "firefoxSerial": "WebSerial for serial communication UART (channel B) is not native either, but an add-on can enable it:",
     "firefoxSerialLink": "Get WebSerial for Firefox",
-    "firefoxAccept": "Got it"
+    "firefoxAccept": "Got it",
+    "help": "Help",
+    "helpClose": "Close"
   },
   "editor": {
     "lineCount": "{n} lines",
@@ -140,6 +144,7 @@
     "binConsoleLink": "Download {name} ({n} bytes)",
     "compileQueued": "Yosys → nextpnr-ice40 → icepack…",
     "compileQueuedBrowser": "In this browser (YoWASP): Yosys → nextpnr-ice40 → icepack…",
+    "downloadProgress": "Downloading {pct}%",
     "compileQueuedServer": "On the toolchain container: Yosys → nextpnr-ice40 → icepack…",
     "compileFailed": "Could not start the compilation.",
     "compileBusy": "A compilation is already running.",

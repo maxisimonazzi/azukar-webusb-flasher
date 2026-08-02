@@ -1,5 +1,6 @@
 {
   "board": {
+    "pickLabel": "Seleccione la placa que va a usar:",
     "group": "Placa",
     "help": "Ayuda de la placa",
     "helpNamed": "Ayuda de {name}",
@@ -40,6 +41,7 @@
     "keptFiles": "Cambié a {name} pero dejé tus .v (no eran el laboratorio de la placa anterior).",
     "azukarBlurb": "iCE40-HX8K, 8 LEDs, 8 botones activos en bajo, CLK12 12 MHz, UART en TX/RX. El programador es FT2232H canal A, mismo mapa iceprog que Alhambra.",
     "eduCiaaBlurb": "iCE40-HX4K (nextpnr hx8k / tq144:4k). 4 LEDs, 4 botones activos en bajo (BTN1 = pin 31). CLK 12 MHz en pin 94. UART TX pin 56, RX pin 55. ADBUS igual que Azukar.",
+    "alhambraBlurb": "iCE40-HX4K (nextpnr hx8k / tq144:4k). 8 LEDs (pines 45–37), SW1/SW2 en 34/33 activos en bajo, CLK 12 MHz en pin 49, UART TX 61 / RX 62. ADBUS iceprog igual que Azukar.",
     "customBlurb": "Perfil que armaste vos. Compilar manda este PCF y este device/package. Grabar usa el mapa ADBUS que elegiste.",
     "genericBlurb": "Perfil listado en boards/<id>/. El PCF va a nextpnr; el ADBUS va al programador WebUSB."
   },
@@ -54,7 +56,9 @@
     "firefoxBody": "Igualmente podés usar el laboratorio: podés editar Verilog, compilar y bajar el .bin. El programador (canal A) usa WebUSB, que Firefox no soporta: para grabar la placa pasate a Chrome o Edge.",
     "firefoxSerial": "WebSerial para ver la comunicación serial UART (canal B) no viene de forma nativa, pero sí se puede utilizar con un complemento externo:",
     "firefoxSerialLink": "Bajar WebSerial for Firefox",
-    "firefoxAccept": "Entendido"
+    "firefoxAccept": "Entendido",
+    "help": "Ayuda",
+    "helpClose": "Cerrar"
   },
   "editor": {
     "lineCount": "{n} líneas",
@@ -140,6 +144,7 @@
     "binConsoleLink": "Descargar {name} ({n} bytes)",
     "compileQueued": "Yosys → nextpnr-ice40 → icepack…",
     "compileQueuedBrowser": "En este navegador (YoWASP): Yosys → nextpnr-ice40 → icepack…",
+    "downloadProgress": "Descargando {pct}%",
     "compileQueuedServer": "En el contenedor toolchain: Yosys → nextpnr-ice40 → icepack…",
     "compileFailed": "No se pudo iniciar la compilación.",
     "compileBusy": "Ya hay una compilación en curso.",
