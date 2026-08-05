@@ -49,6 +49,17 @@
     "title": "Lattice iCE40 FPGA Web Flasher",
     "themeLight": "Claro",
     "themeDark": "Oscuro",
+    "paletteGroup": "Paleta",
+    "palette": {
+      "amber": "Ámbar",
+      "cyan": "Cian",
+      "sky": "Celeste",
+      "red": "Rojo",
+      "violet": "Violeta",
+      "orange": "Naranja",
+      "green": "Verde",
+      "yellow": "Amarillo"
+    },
     "localeEs": "ES",
     "localeEn": "EN",
     "localeGroup": "Idioma",

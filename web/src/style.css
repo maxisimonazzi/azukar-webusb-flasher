@@ -11,78 +11,152 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
-  Paleta ámbar / tinta caliente. Nada de cian: keywords, botones y el
-  anillo de foco viven en hue ~62 (champagne). El fondo oscuro tira a
-  carbón cálido, no a navy.
+  --hue pinta fondos, bordes, primario y keywords. Ámbar (62) es la
+  paleta original: L/C quedan fijos; success / error / info no rotan.
 */
 :root {
   color-scheme: light;
+  --hue: 62;
 
-  /* Claros: el techo es oklch(0.97 0.012 75). Nada de blanco 0.99 que quema. */
-  --bg: oklch(0.94 0.014 75);
-  --surface: oklch(0.97 0.012 75);
-  --surface-2: oklch(0.93 0.015 75);
-  --surface-3: oklch(0.89 0.018 70);
-  --panel: oklch(0.97 0.012 75);
-  --border: oklch(0.84 0.022 70);
-  --border-strong: oklch(0.76 0.03 65);
-  --fg: oklch(0.24 0.03 55);
-  --muted: oklch(0.45 0.025 55);
-  --subtle: oklch(0.52 0.02 60);
-  --primary: oklch(0.52 0.1 55);
-  --primary-bright: oklch(0.58 0.11 52);
-  --primary-fg: oklch(0.97 0.012 75);
-  --accent: oklch(0.52 0.1 55);
-  --accent-soft: oklch(0.91 0.03 75);
+  /* Claros: el techo es oklch(0.97 0.012 …). Nada de blanco 0.99 que quema. */
+  --bg: oklch(0.94 0.014 calc(var(--hue) + 13));
+  --surface: oklch(0.97 0.012 calc(var(--hue) + 13));
+  --surface-2: oklch(0.93 0.015 calc(var(--hue) + 13));
+  --surface-3: oklch(0.89 0.018 calc(var(--hue) + 8));
+  --panel: oklch(0.97 0.012 calc(var(--hue) + 13));
+  --border: oklch(0.84 0.022 calc(var(--hue) + 8));
+  --border-strong: oklch(0.76 0.03 calc(var(--hue) + 3));
+  --fg: oklch(0.24 0.03 calc(var(--hue) - 7));
+  --muted: oklch(0.45 0.025 calc(var(--hue) - 7));
+  --subtle: oklch(0.52 0.02 calc(var(--hue) - 2));
+  --primary: oklch(0.52 0.1 calc(var(--hue) - 7));
+  --primary-bright: oklch(0.58 0.11 calc(var(--hue) - 10));
+  --primary-fg: oklch(0.97 0.012 calc(var(--hue) + 13));
+  --accent: oklch(0.52 0.1 calc(var(--hue) - 7));
+  --accent-soft: oklch(0.91 0.03 calc(var(--hue) + 13));
   --success: oklch(0.52 0.11 150);
   --warning: oklch(0.7 0.14 70);
   --error: oklch(0.55 0.18 25);
   --info: oklch(0.5 0.06 250);
-  --ring: oklch(0.58 0.11 52);
+  --ring: oklch(0.58 0.11 calc(var(--hue) - 10));
   --radius: 0.625rem;
 
-  --syntax-kw: oklch(0.48 0.12 45);
+  --syntax-kw: oklch(0.48 0.12 calc(var(--hue) - 17));
   --syntax-type: oklch(0.42 0.08 280);
   --syntax-str: oklch(0.46 0.1 150);
-  --syntax-num: oklch(0.5 0.13 35);
-  --syntax-com: oklch(0.55 0.02 70);
+  --syntax-num: oklch(0.5 0.13 calc(var(--hue) - 27));
+  --syntax-com: oklch(0.55 0.02 calc(var(--hue) + 8));
   --syntax-fn: oklch(0.42 0.08 300);
-  --syntax-op: oklch(0.45 0.08 40);
-  --syntax-inst: oklch(0.44 0.12 20);
+  --syntax-op: oklch(0.45 0.08 calc(var(--hue) - 22));
+  --syntax-inst: oklch(0.44 0.12 calc(var(--hue) - 42));
 }
 
 .dark {
   color-scheme: dark;
 
-  --bg: oklch(0.17 0.018 55);
-  --surface: oklch(0.21 0.02 55);
-  --surface-2: oklch(0.24 0.022 55);
-  --surface-3: oklch(0.28 0.024 52);
-  --panel: oklch(0.19 0.02 55);
-  --border: oklch(0.32 0.025 55);
-  --border-strong: oklch(0.4 0.03 55);
-  --fg: oklch(0.94 0.015 80);
-  --muted: oklch(0.7 0.02 70);
-  --subtle: oklch(0.6 0.02 65);
-  --primary: oklch(0.82 0.1 72);
-  --primary-bright: oklch(0.88 0.08 78);
-  --primary-fg: oklch(0.2 0.03 55);
-  --accent: oklch(0.82 0.1 72);
-  --accent-soft: oklch(0.3 0.04 60);
+  --bg: oklch(0.17 0.018 calc(var(--hue) - 7));
+  --surface: oklch(0.21 0.02 calc(var(--hue) - 7));
+  --surface-2: oklch(0.24 0.022 calc(var(--hue) - 7));
+  --surface-3: oklch(0.28 0.024 calc(var(--hue) - 10));
+  --panel: oklch(0.19 0.02 calc(var(--hue) - 7));
+  --border: oklch(0.32 0.025 calc(var(--hue) - 7));
+  --border-strong: oklch(0.4 0.03 calc(var(--hue) - 7));
+  --fg: oklch(0.94 0.015 calc(var(--hue) + 18));
+  --muted: oklch(0.7 0.02 calc(var(--hue) + 8));
+  --subtle: oklch(0.6 0.02 calc(var(--hue) + 3));
+  --primary: oklch(0.82 0.1 calc(var(--hue) + 10));
+  --primary-bright: oklch(0.88 0.08 calc(var(--hue) + 16));
+  --primary-fg: oklch(0.2 0.03 calc(var(--hue) - 7));
+  --accent: oklch(0.82 0.1 calc(var(--hue) + 10));
+  --accent-soft: oklch(0.3 0.04 calc(var(--hue) - 2));
   --success: oklch(0.76 0.12 150);
   --warning: oklch(0.82 0.12 70);
   --error: oklch(0.7 0.16 25);
   --info: oklch(0.72 0.06 260);
-  --ring: oklch(0.82 0.1 72);
+  --ring: oklch(0.82 0.1 calc(var(--hue) + 10));
 
-  --syntax-kw: oklch(0.84 0.1 70);
+  --syntax-kw: oklch(0.84 0.1 calc(var(--hue) + 8));
   --syntax-type: oklch(0.78 0.08 290);
   --syntax-str: oklch(0.8 0.1 150);
-  --syntax-num: oklch(0.82 0.12 40);
-  --syntax-com: oklch(0.6 0.02 70);
+  --syntax-num: oklch(0.82 0.12 calc(var(--hue) - 22));
+  --syntax-com: oklch(0.6 0.02 calc(var(--hue) + 8));
   --syntax-fn: oklch(0.8 0.07 310);
-  --syntax-op: oklch(0.78 0.08 50);
-  --syntax-inst: oklch(0.8 0.12 25);
+  --syntax-op: oklch(0.78 0.08 calc(var(--hue) - 12));
+  --syntax-inst: oklch(0.8 0.12 calc(var(--hue) - 37));
+}
+
+:root[data-palette='amber'] {
+  --hue: 62;
+}
+
+:root[data-palette='cyan'] {
+  --hue: 200;
+}
+
+:root[data-palette='sky'] {
+  --hue: 240;
+}
+
+:root[data-palette='red'] {
+  --hue: 18;
+  --primary: oklch(0.5 0.2 25);
+  --primary-bright: oklch(0.55 0.21 22);
+  --accent: oklch(0.5 0.2 25);
+  --accent-soft: oklch(0.9 0.04 20);
+  --ring: oklch(0.55 0.21 22);
+  --syntax-kw: oklch(0.48 0.2 22);
+  --syntax-num: oklch(0.5 0.18 18);
+  --syntax-op: oklch(0.44 0.14 20);
+  --syntax-inst: oklch(0.46 0.18 15);
+}
+
+:root.dark[data-palette='red'] {
+  --primary: oklch(0.7 0.2 22);
+  --primary-bright: oklch(0.76 0.18 25);
+  --accent: oklch(0.7 0.2 22);
+  --accent-soft: oklch(0.3 0.07 18);
+  --ring: oklch(0.7 0.2 22);
+  --syntax-kw: oklch(0.78 0.18 22);
+  --syntax-num: oklch(0.76 0.16 18);
+  --syntax-op: oklch(0.74 0.12 20);
+  --syntax-inst: oklch(0.76 0.18 15);
+}
+
+:root[data-palette='violet'] {
+  --hue: 305;
+}
+
+:root[data-palette='orange'] {
+  --hue: 40;
+  --primary: oklch(0.6 0.19 52);
+  --primary-bright: oklch(0.65 0.2 48);
+  --accent: oklch(0.6 0.19 52);
+  --accent-soft: oklch(0.92 0.05 50);
+  --ring: oklch(0.65 0.2 48);
+  --syntax-kw: oklch(0.54 0.18 48);
+  --syntax-num: oklch(0.56 0.17 42);
+  --syntax-op: oklch(0.5 0.14 45);
+  --syntax-inst: oklch(0.52 0.16 38);
+}
+
+:root.dark[data-palette='orange'] {
+  --primary: oklch(0.76 0.18 52);
+  --primary-bright: oklch(0.82 0.16 55);
+  --accent: oklch(0.76 0.18 52);
+  --accent-soft: oklch(0.32 0.07 45);
+  --ring: oklch(0.76 0.18 52);
+  --syntax-kw: oklch(0.8 0.16 50);
+  --syntax-num: oklch(0.8 0.15 45);
+  --syntax-op: oklch(0.76 0.12 48);
+  --syntax-inst: oklch(0.78 0.16 40);
+}
+
+:root[data-palette='green'] {
+  --hue: 145;
+}
+
+:root[data-palette='yellow'] {
+  --hue: 98;
 }
 
 @theme {

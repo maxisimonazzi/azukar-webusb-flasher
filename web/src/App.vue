@@ -3,6 +3,7 @@ import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRe
 import { useI18n } from 'vue-i18n'
 
 import VerilogEditor from '@/components/VerilogEditor.vue'
+import PaletteSelector from '@/components/PaletteSelector.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import BoardHelpModal from '@/components/BoardHelpModal.vue'
 import BoardSelector from '@/components/BoardSelector.vue'
@@ -904,6 +905,7 @@ onBeforeUnmount(() => {
             {{ t('app.localeEn') }}
           </button>
         </div>
+        <PaletteSelector />
         <button
           type="button"
           class="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-primary transition-colors hover:bg-surface-2"

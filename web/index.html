@@ -11,6 +11,10 @@
           var t = localStorage.getItem('lattice.theme') || localStorage.getItem('azukar.theme')
           if (t !== 'light' && t !== 'dark') t = 'dark'
           if (t === 'dark') document.documentElement.classList.add('dark')
+          var palettes = ['amber', 'cyan', 'sky', 'red', 'violet', 'orange', 'green', 'yellow']
+          var p = localStorage.getItem('lattice.palette') || localStorage.getItem('azukar.palette')
+          if (palettes.indexOf(p) === -1) p = 'amber'
+          document.documentElement.setAttribute('data-palette', p)
           var l = localStorage.getItem('lattice.locale') || localStorage.getItem('azukar.locale')
           if (l === 'en' || l === 'es') document.documentElement.lang = l
         } catch (e) {
