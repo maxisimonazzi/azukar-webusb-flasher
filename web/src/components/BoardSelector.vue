@@ -66,7 +66,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onPointer))
   <div ref="root" class="relative" data-board-drop>
     <button
       type="button"
-      class="inline-flex max-w-[14rem] items-center gap-1 rounded-lg border border-border bg-surface-2/60 px-2 py-1 text-xs font-semibold tracking-wide text-fg transition-colors hover:bg-surface-2"
+      class="inline-flex max-w-[14rem] items-center gap-1 rounded-lg border border-border bg-surface-2/60 px-2 py-1 text-xs font-semibold tracking-wide text-fg transition-colors hover:bg-surface-2 max-md:max-w-none"
       :aria-expanded="open"
       :aria-label="t('board.group')"
       @click="toggle"

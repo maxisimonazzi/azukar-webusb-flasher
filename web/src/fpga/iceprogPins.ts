@@ -1,5 +1,7 @@
 /**
  * GPIO low-byte encoding from IceStorm iceprog.c `set_cs_creset`.
+ * Copyright (C) 2015 Claire Xenia Wolf, 2018 Piotr Esden-Tempski (ISC).
+ * https://github.com/YosysHQ/icestorm — notice in web/public/THIRD_PARTY_NOTICES.md
  *
  * Bits come from the active board profile (programmer.adbus).
  * Default is the Iceprog / Alhambra / Azukar / EDU-CIAA map:

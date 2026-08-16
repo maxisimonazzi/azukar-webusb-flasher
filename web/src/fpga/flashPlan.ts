@@ -1,4 +1,8 @@
-/** How iceprog walks a bitstream: 64 KiB erases, then 256-byte pages. */
+/**
+ * How iceprog walks a bitstream: 64 KiB erases, then 256-byte pages.
+ * Ported from IceStorm iceprog.c. Copyright (C) 2015 Claire Xenia Wolf,
+ * 2018 Piotr Esden-Tempski (ISC). Notice in web/public/THIRD_PARTY_NOTICES.md
+ */
 
 export const FLASH_PAGE = 256
 export const FLASH_SECTOR = 65536

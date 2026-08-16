@@ -1,5 +1,8 @@
 /**
  * Iceprog-style flash program + FPGA config reset, over the MPSSE in `mpsse.ts`.
+ * Sequence follows IceStorm iceprog.c (flash pages, iceprog -S SRAM slave).
+ * Copyright (C) 2015 Claire Xenia Wolf, 2018 Piotr Esden-Tempski (ISC).
+ * https://github.com/YosysHQ/icestorm — notice in web/public/THIRD_PARTY_NOTICES.md
  */
 import { formatHexDump } from '@/fpga/flashDump'
 import {

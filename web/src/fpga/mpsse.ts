@@ -1,3 +1,8 @@
+/**
+ * FTDI MPSSE + SPI flash/SRAM commands ported from IceStorm iceprog.c.
+ * Copyright (C) 2015 Claire Xenia Wolf, 2018 Piotr Esden-Tempski (ISC).
+ * https://github.com/YosysHQ/icestorm — notice in web/public/THIRD_PARTY_NOTICES.md
+ */
 import { FTDI_BULK_PACKET, ftdiPayloadFromBulkIn } from '@/fpga/ftdiUsb'
 import {
   cdoneMask,

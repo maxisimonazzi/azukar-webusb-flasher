@@ -160,6 +160,7 @@
 }
 
 @theme {
+  --breakpoint-desk: 1100px;
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
@@ -217,6 +218,20 @@
   #app {
     height: 100dvh;
     overflow: hidden;
+  }
+
+  @media (max-width: 1099px) {
+    html,
+    body {
+      height: auto;
+      overflow: auto;
+    }
+
+    #app {
+      height: auto;
+      min-height: 100dvh;
+      overflow: visible;
+    }
   }
 }
 

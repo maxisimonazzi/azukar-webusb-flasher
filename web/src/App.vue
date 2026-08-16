@@ -134,7 +134,7 @@ let stopConnectionWatch: (() => void) | null = null
 let logRaf: number | null = null
 const logPending: string[] = []
 
-const slimBtn = '!h-[25px] min-h-[25px] px-2 text-xs rounded-md'
+const slimBtn = '!h-[25px] min-h-[25px] px-2 text-xs rounded-md max-md:!h-8 max-md:min-h-8'
 const dropMenu =
   'absolute z-30 mt-1 min-w-max rounded-lg border border-border bg-surface py-1 shadow-lg'
 const dropMenuStart = `${dropMenu} left-0`
@@ -865,13 +865,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex h-dvh min-h-0 flex-col overflow-hidden">
-    <header class="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
+  <div class="flex h-dvh min-h-0 flex-col overflow-hidden max-desk:h-auto max-desk:min-h-dvh max-desk:overflow-x-hidden max-desk:overflow-y-auto">
+    <header class="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5 max-md:flex-col max-md:items-stretch max-md:gap-2 max-md:px-3">
       <div class="flex items-center gap-3">
         <img src="/favicon.svg" alt="" class="h-7 w-7" width="28" height="28">
-        <h1 class="text-sm font-semibold tracking-wide text-fg">{{ t('app.title') }}</h1>
+        <h1 class="text-sm font-semibold tracking-wide text-fg max-md:text-[0.8125rem] max-md:leading-snug">{{ t('app.title') }}</h1>
       </div>
-      <div class="flex flex-wrap items-center justify-end gap-2">
+      <div class="flex flex-wrap items-center justify-end gap-2 max-md:justify-start">
         <label class="flex items-center gap-2 text-xs font-semibold text-muted">
           <span class="whitespace-nowrap">{{ t('board.pickLabel') }}</span>
           <BoardSelector
@@ -947,9 +947,9 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <div class="flex min-h-0 flex-1 gap-4 overflow-hidden px-4 py-3">
-      <section class="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-border bg-surface">
-        <aside class="flex w-[11.5rem] shrink-0 flex-col overflow-y-auto border-r border-border">
+    <div class="flex min-h-0 flex-1 gap-4 overflow-hidden px-4 py-3 max-desk:flex-none max-desk:flex-col max-desk:overflow-visible max-md:gap-3 max-md:px-3">
+      <section class="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-border bg-surface max-desk:flex-none max-md:flex-col">
+        <aside class="flex shrink-0 flex-col overflow-y-auto border-r border-border max-md:w-full max-md:flex-none max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-r-0 max-md:border-b md:w-[11.5rem]">
           <div class="px-2 pt-3 pb-1">
             <label class="mb-1 block text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase" for="fpga-top">
               {{ t('fpga.topModule') }}
@@ -973,8 +973,8 @@ onBeforeUnmount(() => {
               +
             </button>
           </div>
-          <ul class="flex flex-col pb-2">
-            <li v-for="f in files" :key="f.name">
+          <ul class="flex flex-col pb-2 max-md:flex-row max-md:overflow-x-auto">
+            <li v-for="f in files" :key="f.name" class="max-md:shrink-0">
               <div
                 class="flex items-stretch"
                 :class="f.name === activeName && f.open ? 'bg-surface-2' : ''"
@@ -1114,7 +1114,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-          <div class="min-h-0 flex-1 p-2">
+          <div class="min-h-0 flex-1 p-2 max-md:h-[50vh] md:max-desk:h-[62vh]">
             <VerilogEditor
               v-if="activeFile"
               :key="activeName"
@@ -1130,7 +1130,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="flex min-h-0 min-w-0 w-[calc(35%+50px)] shrink-0 flex-col gap-2">
+      <section class="flex min-h-0 min-w-0 shrink-0 flex-col gap-2 max-desk:w-full max-desk:flex-none max-desk:shrink desk:w-[calc(35%+50px)]">
         <input
           ref="fileInput"
           type="file"
@@ -1145,8 +1145,8 @@ onBeforeUnmount(() => {
           class="hidden"
           @change="onZipFile"
         >
-        <div class="flex min-h-0 flex-1 flex-col gap-2">
-          <div class="flex min-h-0 flex-[1.2] flex-col overflow-hidden rounded-xl border border-border bg-surface">
+        <div class="flex min-h-0 flex-1 flex-col gap-2 max-desk:flex-none">
+          <div class="flex min-h-0 flex-[1.2] flex-col overflow-hidden rounded-xl border border-border bg-surface max-desk:h-64 max-desk:flex-none">
             <div class="relative z-20 shrink-0 border-b border-border px-2 py-1.5">
               <div class="flex flex-wrap items-center gap-1.5">
                 <span
@@ -1196,7 +1196,7 @@ onBeforeUnmount(() => {
                 <div data-fpga-drop class="relative">
                   <button
                     type="button"
-                    class="inline-flex h-[25px] cursor-pointer items-center rounded-md border border-border bg-surface-2 px-2 text-xs font-semibold text-fg hover:bg-surface-3"
+                    class="inline-flex h-[25px] cursor-pointer items-center rounded-md border border-border bg-surface-2 px-2 text-xs font-semibold text-fg hover:bg-surface-3 max-md:h-8"
                     :class="usbBusy || uiLocked ? 'pointer-events-none opacity-60' : ''"
                     @click="toggleMenu('flash')"
                   >
@@ -1214,7 +1214,7 @@ onBeforeUnmount(() => {
                 <div data-fpga-drop class="relative">
                   <button
                     type="button"
-                    class="inline-flex h-[25px] cursor-pointer items-center rounded-md border border-border-strong bg-transparent px-2 text-xs font-semibold text-fg hover:bg-surface-2"
+                    class="inline-flex h-[25px] cursor-pointer items-center rounded-md border border-border-strong bg-transparent px-2 text-xs font-semibold text-fg hover:bg-surface-2 max-md:h-8"
                     :class="usbBusy || uiLocked ? 'pointer-events-none opacity-60' : ''"
                     :title="t('fpga.sramHint')"
                     @click="toggleMenu('sram')"
@@ -1236,7 +1236,7 @@ onBeforeUnmount(() => {
                 <div data-fpga-drop class="relative">
                   <button
                     type="button"
-                    class="inline-flex h-[25px] cursor-pointer items-center rounded-md border border-border-strong bg-transparent px-2 text-xs font-semibold text-fg hover:bg-surface-2"
+                    class="inline-flex h-[25px] cursor-pointer items-center rounded-md border border-border-strong bg-transparent px-2 text-xs font-semibold text-fg hover:bg-surface-2 max-md:h-8"
                     :class="usbBusy ? 'pointer-events-none opacity-60' : ''"
                     @click="toggleMenu('read')"
                   >
@@ -1251,7 +1251,7 @@ onBeforeUnmount(() => {
                 <div data-fpga-drop class="relative">
                   <button
                     type="button"
-                    class="inline-flex h-[25px] cursor-pointer items-center rounded-md border border-border-strong bg-transparent px-2 text-xs font-semibold text-fg hover:bg-surface-2"
+                    class="inline-flex h-[25px] cursor-pointer items-center rounded-md border border-border-strong bg-transparent px-2 text-xs font-semibold text-fg hover:bg-surface-2 max-md:h-8"
                     :class="usbBusy ? 'pointer-events-none opacity-60' : ''"
                     :title="t('fpga.readEepromHint')"
                     @click="toggleMenu('eeprom')"
@@ -1291,7 +1291,7 @@ onBeforeUnmount(() => {
               >{{ t('fpga.binConsoleLink', { name: compileBinLink.name, n: compileBinLink.n }) }}</a>
             </div>
           </div>
-          <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface">
+          <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface max-desk:h-52 max-desk:flex-none">
             <div class="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border px-2 py-1.5">
               <span
                 class="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
@@ -1303,7 +1303,7 @@ onBeforeUnmount(() => {
               <select
                 id="fpga-uart-baud"
                 v-model.number="uartBaud"
-                class="h-[25px] rounded-md border border-border bg-surface-2 px-1.5 font-mono text-xs"
+                class="h-[25px] rounded-md border border-border bg-surface-2 px-1.5 font-mono text-xs max-md:h-8"
                 :disabled="uartConnected || uartBusy"
                 :title="t('fpga.baudHint')"
               >
@@ -1347,7 +1347,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <footer class="shrink-0 border-t border-border px-4 py-1.5 text-center text-[0.8125rem] leading-relaxed text-muted">
+    <footer class="shrink-0 border-t border-border px-4 py-1.5 text-center text-[0.8125rem] leading-relaxed text-muted max-md:px-3 max-md:text-xs">
       <span>Maximiliano Martin Simonazzi</span>
       <span class="mx-1.5 text-subtle">·</span>
       <a
