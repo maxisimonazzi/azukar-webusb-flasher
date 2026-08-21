@@ -34,7 +34,7 @@ MAX_FILE_CHARS = 20_000
 MAX_PCF_CHARS = 40_000
 
 TOP_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-FILE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.v$")
+FILE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*\.(v|pcf|txt|hex)$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 BOARD_ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
 
@@ -120,7 +120,9 @@ def _parse_files(raw: object) -> list[tuple[str, str]]:
 
 
 def _run_compile(top: str, files: list[tuple[str, str]], board: dict) -> dict:
-    names = [name for name, _ in files]
+    names = [name for name, _ in files if name.endswith(".v")]
+    if not names:
+        raise ValueError("no .v files to compile")
     yosys = [
         "yosys",
         "-Q",

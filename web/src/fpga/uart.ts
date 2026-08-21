@@ -1,6 +1,6 @@
 /** WebSerial on FTDI channel B. Channel A (WebUSB/MPSSE) stays untouched. */
 
-import { getActivePid, getActiveVid } from '@/fpga/activeBoard'
+import { getActivePid, getActiveVid } from './activeBoard.ts'
 
 export const UART_BAUDS = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600] as const
 export type UartBaud = (typeof UART_BAUDS)[number]

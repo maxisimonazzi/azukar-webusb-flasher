@@ -12,8 +12,8 @@
  * SRAM slave drives CRESET high so the mode-sample edge does not wait on
  * the 10 kΩ. Flash /CS and FPGA SPI_SS_B share ADBUS4; ADBUS3 is unused.
  */
-import { getActiveAdbus, getActivePid, getActiveVid } from '@/fpga/activeBoard'
-import { ICEPROG_ADBUS, type AdbusBits } from '@/fpga/boardTypes'
+import { getActiveAdbus, getActivePid, getActiveVid } from './activeBoard.ts'
+import { ICEPROG_ADBUS, type AdbusBits } from './boardTypes.ts'
 
 function adbusMask(bit: number): number {
   return 1 << bit

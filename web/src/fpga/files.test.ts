@@ -5,9 +5,12 @@ import {
   addFpgaFile,
   closeFpgaTab,
   deleteFpgaFile,
+  getAllowedImportExtensions,
+  isAllowedFilename,
   isFpgaFilename,
   nextFpgaFilename,
   openFpgaTab,
+  projectZipDownloadName,
   uniquifyFpgaName,
   visibleFpgaTabs,
   zipPathToVerilogName,
@@ -21,6 +24,20 @@ test('accepts identifier.v names', () => {
   assert.equal(isFpgaFilename('and2.v'), true)
   assert.equal(isFpgaFilename('foo.sv'), false)
   assert.equal(isFpgaFilename('../x.v'), false)
+})
+
+test('getAllowedImportExtensions returns defaults when env is unset', () => {
+  const exts = getAllowedImportExtensions()
+  assert.deepEqual(exts, ['v', 'pcf', 'txt'])
+})
+
+test('isAllowedFilename validates extension and safe stem', () => {
+  assert.equal(isAllowedFilename('pins.pcf'), true)
+  assert.equal(isAllowedFilename('memory.txt'), true)
+  assert.equal(isAllowedFilename('top_module.v'), true)
+  assert.equal(isAllowedFilename('bad..name.txt'), false)
+  assert.equal(isAllowedFilename('../hack.txt'), false)
+  assert.equal(isAllowedFilename('script.py'), false)
 })
 
 test('next filename skips taken names', () => {
@@ -75,18 +92,23 @@ test('addFpgaFile is not capped at 10 tabs', () => {
 
 test('zip path uses basename and skips junk', () => {
   assert.equal(zipPathToVerilogName('src/and2.v'), 'and2.v')
+  assert.equal(zipPathToVerilogName('src/pins.pcf'), 'pins.pcf')
+  assert.equal(zipPathToVerilogName('data/rom.txt'), 'rom.txt')
   assert.equal(zipPathToVerilogName('__MACOSX/._and2.v'), null)
   assert.equal(zipPathToVerilogName('readme.md'), null)
 })
 
-test('uniquifyFpgaName suffixes collisions', () => {
-  const taken = new Set(['and2.v'])
+test('uniquifyFpgaName suffixes collisions preserving extension', () => {
+  const taken = new Set(['and2.v', 'pins.pcf'])
   assert.equal(uniquifyFpgaName('and2.v', taken), 'and2_2.v')
+  assert.equal(uniquifyFpgaName('pins.pcf', taken), 'pins_2.pcf')
 })
 
-test('normalizeFpgaFilename adds .v and rejects junk', () => {
+test('normalizeFpgaFilename adds .v when missing and keeps allowed extensions', () => {
   assert.equal(normalizeFpgaFilename('top_module'), 'top_module.v')
   assert.equal(normalizeFpgaFilename('top_module.v'), 'top_module.v')
+  assert.equal(normalizeFpgaFilename('pins.pcf'), 'pins.pcf')
+  assert.equal(normalizeFpgaFilename('rom.txt'), 'rom.txt')
   assert.equal(normalizeFpgaFilename('  foo  '), 'foo.v')
   assert.equal(normalizeFpgaFilename('1bad'), null)
   assert.equal(normalizeFpgaFilename('../x'), null)
@@ -103,10 +125,21 @@ test('renameFpgaFile changes the name when free and valid', () => {
     ['gates.v', 'uart_tx.v'],
   )
   assert.equal(renameFpgaFile(files, 'mod.v', 'uart_tx')[0]?.name, 'mod.v')
+  assert.equal(renameFpgaFile(files, 'mod.v', 'counter.v')[0]?.name, 'counter.v')
+  assert.equal(renameFpgaFile(files, 'mod.v', 'data.txt')[0]?.name, 'data.txt')
+  assert.equal(renameFpgaFile(files, 'mod.v', 'pins.pcf')[0]?.name, 'pins.pcf')
 })
 
 test('binDownloadName follows the top module', () => {
   assert.equal(binDownloadName('top_module'), 'top_module.bin')
   assert.equal(binDownloadName(' blinky '), 'blinky.bin')
   assert.equal(binDownloadName('not a name'), 'top_module.bin')
+})
+
+test('projectZipDownloadName follows top module or input name', () => {
+  assert.equal(projectZipDownloadName('top_module'), 'top_module.zip')
+  assert.equal(projectZipDownloadName('blinky.v'), 'blinky.v.zip')
+  assert.equal(projectZipDownloadName('blinky'), 'blinky.zip')
+  assert.equal(projectZipDownloadName('my_project.zip'), 'my_project.zip')
+  assert.equal(projectZipDownloadName('   '), 'top_module.zip')
 })

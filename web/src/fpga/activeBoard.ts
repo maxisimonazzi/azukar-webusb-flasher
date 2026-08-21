@@ -1,4 +1,4 @@
-import { ICEPROG_ADBUS, type AdbusBits, type BoardProfile } from '@/fpga/boardTypes'
+import { ICEPROG_ADBUS, type AdbusBits, type BoardProfile } from './boardTypes.ts'
 
 let current: BoardProfile | null = null
 let adbus: AdbusBits = { ...ICEPROG_ADBUS }

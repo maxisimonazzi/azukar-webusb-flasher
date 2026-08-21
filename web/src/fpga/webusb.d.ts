@@ -37,6 +37,7 @@ interface USBDevice {
   open(): Promise<void>
   close(): Promise<void>
   forget(): Promise<void>
+  reset?(): Promise<void>
   selectConfiguration(configurationValue: number): Promise<void>
   claimInterface(interfaceNumber: number): Promise<void>
   releaseInterface(interfaceNumber: number): Promise<void>

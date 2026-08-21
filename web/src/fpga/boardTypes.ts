@@ -1,6 +1,6 @@
 /** Shared board types and PCF helpers. No Vite glob — Node tests can import this. */
 
-import { readLocal, removeLocal, writeLocal } from '@/lib/storage'
+import { readLocal, removeLocal, writeLocal } from '../lib/storage.ts'
 
 export const CUSTOM_BOARD_ID = 'custom'
 export const DEFAULT_BOARD_ID = 'azukar-v2'

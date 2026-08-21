@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { concatFtdiPayloads, ftdiPayloadFromBulkIn } from './ftdiUsb.ts'
+import {
+  FLASH_READ_CMD_BYTES,
+  FLASH_READ_MAX_DATA,
+  FTDI_MAX_PAYLOAD,
+  concatFtdiPayloads,
+  ftdiBulkInRequestLength,
+  ftdiPayloadFromBulkIn,
+  flashReadSliceSizes,
+} from './ftdiUsb.ts'
 
 test('each USB packet drops the 2-byte FTDI status header', () => {
   const out = concatFtdiPayloads([
@@ -38,4 +46,16 @@ test('coalesced 70-byte IN leaked 0x31 0x60 at dump offset 0x3A; splitting packe
   const payload = ftdiPayloadFromBulkIn(coalesced)
   assert.equal(payload.length, 66)
   assert.ok(payload.every((b) => b === 0xff))
+})
+
+test('WinUSB on Windows 10 must never see a transferIn smaller than 64', () => {
+  assert.equal(ftdiBulkInRequestLength(), 64)
+  assert.equal(ftdiBulkInRequestLength(), FTDI_MAX_PAYLOAD + 2)
+})
+
+test('a 64-byte flash dump chunk does not fit in one FTDI packet; split it', () => {
+  assert.equal(FLASH_READ_CMD_BYTES + FLASH_READ_MAX_DATA, FTDI_MAX_PAYLOAD)
+  assert.deepEqual(flashReadSliceSizes(64), [58, 6])
+  assert.deepEqual(flashReadSliceSizes(58), [58])
+  assert.deepEqual(flashReadSliceSizes(0), [])
 })

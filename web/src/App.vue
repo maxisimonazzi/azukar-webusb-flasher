@@ -8,6 +8,7 @@ import AppButton from '@/components/ui/AppButton.vue'
 import BoardHelpModal from '@/components/BoardHelpModal.vue'
 import BoardSelector from '@/components/BoardSelector.vue'
 import CustomBoardModal from '@/components/CustomBoardModal.vue'
+import ExportProjectModal from '@/components/ExportProjectModal.vue'
 import HelpModal from '@/components/HelpModal.vue'
 import { setActiveBoard } from '@/fpga/activeBoard'
 import {
@@ -29,8 +30,10 @@ import {
   binDownloadName,
   closeFpgaTab,
   deleteFpgaFile,
+  getAllowedImportExtensions,
   normalizeFpgaFilename,
   openFpgaTab,
+  projectZipDownloadName,
   renameFpgaFile,
   visibleFpgaTabs,
 } from '@/fpga/files'
@@ -115,7 +118,9 @@ const compileBinLink = ref<{ n: number; name: string } | null>(null)
 const renaming = ref<string | null>(null)
 const renameDraft = ref('')
 const renameWhere = ref<'tree' | 'tabs' | null>(null)
-const renameInput = ref<HTMLInputElement | null>(null)
+const treeRenameInput = ref<HTMLInputElement | null>(null)
+const tabsRenameInput = ref<HTMLInputElement | null>(null)
+const showExportModal = ref(false)
 let renameReady = false
 const fileInput = ref<HTMLInputElement | null>(null)
 const zipInput = ref<HTMLInputElement | null>(null)
@@ -259,23 +264,25 @@ function onDeleteFile(name: string) {
   }
 }
 
-function beginRename(name: string, where: 'tree' | 'tabs') {
-  if (renaming.value && renaming.value !== name) commitRename()
-  renameReady = false
-  renaming.value = name
-  renameWhere.value = where
-  renameDraft.value = name.replace(/\.v$/i, '')
+function getRenameElement(where: 'tree' | 'tabs'): HTMLInputElement | null {
+  const raw = where === 'tree' ? treeRenameInput.value : tabsRenameInput.value
+  if (!raw) return null
+  if (Array.isArray(raw)) return (raw[0] as HTMLInputElement) ?? null
+  return raw as HTMLInputElement
 }
 
-function bindRenameInput(el: unknown) {
-  if (!(el instanceof HTMLInputElement)) return
-  renameInput.value = el
-  el.focus()
-  el.select()
-  requestAnimationFrame(() => {
-    renameReady = true
+async function beginRename(name: string, where: 'tree' | 'tabs') {
+  if (renaming.value && renaming.value !== name) commitRename()
+  renaming.value = name
+  renameWhere.value = where
+  renameDraft.value = name.endsWith('.v') ? name.replace(/\.v$/i, '') : name
+  renameReady = true
+  await nextTick()
+  const el = getRenameElement(where)
+  if (el && typeof el.focus === 'function') {
     el.focus()
-  })
+    el.select()
+  }
 }
 
 function commitRename() {
@@ -316,8 +323,16 @@ function onImportZip() {
 }
 
 function onExportZip() {
-  const zip = verilogFilesToZip(files.value.map((f) => ({ name: f.name, content: f.content })))
-  downloadNamed('azukar-proyecto.zip', new Blob([zip], { type: 'application/zip' }))
+  showExportModal.value = true
+}
+
+function handleConfirmExport(projectName: string) {
+  const openFiles = files.value.filter((f) => f.open)
+  const toExport = openFiles.length > 0 ? openFiles : files.value
+  const zip = verilogFilesToZip(toExport.map((f) => ({ name: f.name, content: f.content })))
+  const zipName = projectZipDownloadName(projectName)
+  downloadNamed(zipName, new Blob([zip], { type: 'application/zip' }))
+  showExportModal.value = false
 }
 
 async function onZipFile(ev: Event) {
@@ -326,9 +341,10 @@ async function onZipFile(ev: Event) {
   input.value = ''
   if (!file) return
   try {
-    const imported = await verilogFilesFromZip(await file.arrayBuffer())
+    const allowedExts = getAllowedImportExtensions()
+    const imported = await verilogFilesFromZip(await file.arrayBuffer(), allowedExts)
     if (imported.length === 0) {
-      appendLog(t('fpga.zipNoVerilog'))
+      appendLog(t('fpga.zipNoFiles', { exts: allowedExts.map((e) => `.${e}`).join(', ') }))
       return
     }
     files.value = imported.map((f) => ({ ...f, open: true }))
@@ -981,7 +997,7 @@ onBeforeUnmount(() => {
               >
                 <input
                   v-if="renaming === f.name && renameWhere === 'tree'"
-                  :ref="bindRenameInput"
+                  ref="treeRenameInput"
                   v-model="renameDraft"
                   class="min-w-0 flex-1 bg-surface px-3 py-1.5 font-mono text-sm text-fg outline-none"
                   :aria-label="t('fpga.renameHint')"
@@ -1036,7 +1052,7 @@ onBeforeUnmount(() => {
               >
                 <input
                   v-if="renaming === f.name && renameWhere === 'tabs'"
-                  :ref="bindRenameInput"
+                  ref="tabsRenameInput"
                   v-model="renameDraft"
                   class="w-28 bg-transparent font-mono text-sm text-fg outline-none"
                   :aria-label="t('fpga.renameHint')"
@@ -1413,6 +1429,12 @@ onBeforeUnmount(() => {
       :initial="customDraft"
       @save="onCustomSave"
       @close="showCustomModal = false"
+    />
+    <ExportProjectModal
+      :open="showExportModal"
+      :initial-name="top.trim().replace(/\.v$/i, '') || 'top_module'"
+      @export="handleConfirmExport"
+      @close="showExportModal = false"
     />
   </div>
 </template>

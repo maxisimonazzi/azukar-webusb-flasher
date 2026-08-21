@@ -35,6 +35,7 @@ async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
 
 export async function verilogFilesFromZip(
   buf: ArrayBuffer,
+  allowedExtensions?: string[],
 ): Promise<{ name: string; content: string }[]> {
   const view = new DataView(buf)
   const bytes = new Uint8Array(buf)
@@ -59,7 +60,7 @@ export async function verilogFilesFromZip(
     offset += 46 + nameLen + extraLen + commentLen
 
     if (rawName.endsWith('/')) continue
-    const base = zipPathToVerilogName(rawName)
+    const base = zipPathToVerilogName(rawName, allowedExtensions)
     if (!base) continue
 
     if (u32(view, localOff) !== SIG_LOCAL) {

@@ -25,7 +25,7 @@ export type SramProgramStats = {
 export interface Ice40Mpsse {
   connect(opts?: { forcePicker?: boolean }): Promise<USBDevice>
   readEeprom(device: USBDevice, bytes?: number): Promise<Uint8Array>
-  disconnect(device: USBDevice): Promise<void>
+  disconnect(device: USBDevice, opts?: { forget?: boolean; resetUsb?: boolean }): Promise<void>
   initialize(device: USBDevice): Promise<void>
   spiInit(device: USBDevice, clkDiv?: number): Promise<void>
   setGpio(device: USBDevice, value: number, direction: number): Promise<void>

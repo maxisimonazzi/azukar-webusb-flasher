@@ -4,6 +4,7 @@
  * Copyright (C) 2015 Claire Xenia Wolf, 2018 Piotr Esden-Tempski (ISC).
  * https://github.com/YosysHQ/icestorm — notice in web/public/THIRD_PARTY_NOTICES.md
  */
+import { FLASH_READ_MAX_DATA } from '@/fpga/ftdiUsb'
 import { formatHexDump } from '@/fpga/flashDump'
 import {
   flashSizeFromJedec,
@@ -24,7 +25,7 @@ import type {
   SramProgramStats,
 } from '@/fpga/types'
 
-const FLASH_READ_CHUNK = 64
+const FLASH_READ_CHUNK = FLASH_READ_MAX_DATA
 const SRAM_SPI_CHUNK = 4096
 const SRAM_DUMMY_FF = 7
 const SRAM_EXTRA_DUMMY_FF = 16
@@ -100,10 +101,17 @@ if (typeof navigator !== 'undefined' && navigator.usb) {
   })
 }
 
-export async function closeMpsseSession(): Promise<void> {
+export async function closeMpsseSession(
+  opts?: { forget?: boolean; resetUsb?: boolean },
+): Promise<void> {
   const device = session
   rememberSession(null)
-  if (device) await mpsse.disconnect(device)
+  if (device) {
+    await mpsse.disconnect(device, {
+      forget: opts?.forget ?? false,
+      resetUsb: opts?.resetUsb ?? true,
+    })
+  }
 }
 
 async function openMpsse(
@@ -115,7 +123,7 @@ async function openMpsse(
     return session
   }
   if (opts?.forcePicker && session) {
-    await closeMpsseSession()
+    await closeMpsseSession({ forget: true, resetUsb: false })
   }
   const device = await step('USB — Chrome pide qué placa', log, () =>
     mpsse.connect(opts),
@@ -162,7 +170,7 @@ export async function disconnectMpsse(log: ProgramLog): Promise<void> {
     return
   }
   log('[mpsse] desconectando (suelto el bus y olvido el permiso de Chrome)')
-  await closeMpsseSession()
+  await closeMpsseSession({ forget: true, resetUsb: false })
 }
 
 export async function programIce40Flash(

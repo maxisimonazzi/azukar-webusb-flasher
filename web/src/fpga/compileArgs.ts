@@ -1,6 +1,6 @@
 /** Same limits and argv as toolchain/compile_server.py — used by the browser worker. */
 
-import { FPGA_IDENT_RE, FPGA_NAME_RE } from '@/fpga/files'
+import { FPGA_IDENT_RE, FPGA_NAME_RE, isAllowedFilename } from './files.ts'
 
 export const MAX_FILES = 100
 export const MAX_CHARS = 80_000
@@ -47,15 +47,18 @@ export function buildCompileJob(
   let total = 0
   const seen = new Set<string>()
   for (const file of files) {
-    if (!FPGA_NAME_RE.test(file.name)) fail('COMPILE_BAD_INPUT')
+    if (!FPGA_NAME_RE.test(file.name) && !isAllowedFilename(file.name)) fail('COMPILE_BAD_INPUT')
     if (file.content.length > MAX_FILE_CHARS) fail('COMPILE_TOO_LARGE')
     if (seen.has(file.name)) fail('COMPILE_BAD_INPUT')
     seen.add(file.name)
     total += file.content.length
     if (total > MAX_CHARS) fail('COMPILE_TOO_LARGE')
-    names.push(file.name)
+    if (file.name.toLowerCase().endsWith('.v')) {
+      names.push(file.name)
+    }
     tree[file.name] = file.content
   }
+  if (!names.length) fail('COMPILE_BAD_INPUT')
 
   return {
     yosysArgs: ['-Q', '-p', `synth_ice40 -top ${topName} -json out.json`, ...names],

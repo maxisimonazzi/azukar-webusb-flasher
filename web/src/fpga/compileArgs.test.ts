@@ -82,3 +82,22 @@ test('extractTreeFile reads out.bin as bytes', () => {
   assert.deepEqual(extractTreeFile({ 'out.bin': bin, 'out.asc': 'x' }, 'out.bin'), bin)
   assert.equal(extractTreeFile({ 'out.bin': bin }, 'missing.bin'), null)
 })
+
+test('buildCompileJob includes .txt files in tree but only passes .v to yosysArgs', () => {
+  const job = buildCompileJob(
+    [
+      { name: 'top_module.v', content: 'module top_module; endmodule' },
+      { name: 'rom.txt', content: 'DEADBEEF\n' },
+    ],
+    'top_module',
+    board,
+  )
+  assert.deepEqual(job.yosysArgs, [
+    '-Q',
+    '-p',
+    'synth_ice40 -top top_module -json out.json',
+    'top_module.v',
+  ])
+  assert.equal(job.files['rom.txt'], 'DEADBEEF\n')
+})
+

@@ -2,6 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_COMPILE_BACKEND?: string
+  readonly VITE_ALLOWED_IMPORT_EXTENSIONS?: string
 }
 
 interface ImportMeta {

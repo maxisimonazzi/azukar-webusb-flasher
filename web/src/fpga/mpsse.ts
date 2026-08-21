@@ -3,7 +3,7 @@
  * Copyright (C) 2015 Claire Xenia Wolf, 2018 Piotr Esden-Tempski (ISC).
  * https://github.com/YosysHQ/icestorm — notice in web/public/THIRD_PARTY_NOTICES.md
  */
-import { FTDI_BULK_PACKET, ftdiPayloadFromBulkIn } from '@/fpga/ftdiUsb'
+import { ftdiBulkInRequestLength, ftdiPayloadFromBulkIn, flashReadSliceSizes } from '@/fpga/ftdiUsb'
 import {
   cdoneMask,
   ftdiPid,
@@ -66,9 +66,9 @@ async function send(device: USBDevice, bytes: number[]): Promise<void> {
   await device.transferOut(OUT_EP, new Uint8Array(bytes))
 }
 
-async function recv(device: USBDevice, length: number): Promise<Uint8Array> {
+async function recv(device: USBDevice): Promise<Uint8Array> {
   const result = await Promise.race([
-    device.transferIn(IN_EP, Math.min(length, FTDI_BULK_PACKET)),
+    device.transferIn(IN_EP, ftdiBulkInRequestLength()),
     sleep(4000).then(() => {
       throw new Error('FTDI transferIn timeout (4s)')
     }),
@@ -89,12 +89,13 @@ async function recvExact(device: USBDevice, nbytes: number): Promise<Uint8Array>
   let off = 0
   let empty = 0
   while (off < nbytes) {
-    const payload = await recv(device, nbytes - off + 2)
+    const payload = await recv(device)
     if (payload.length === 0) {
       empty += 1
       if (empty > 80) {
         throw new Error(`short FTDI read: got ${off} of ${nbytes}`)
       }
+      await sleep(2)
       continue
     }
     empty = 0
@@ -178,12 +179,28 @@ export const mpsse: Ice40Mpsse = {
     })
   },
 
-  async disconnect(device) {
-    if (!device.opened) return
-    try {
-      await applyGpio(device, iceprogReleaseBus())
-    } catch {
-      // already gone
+  async disconnect(device, opts) {
+    const forget = opts?.forget !== false
+    const resetUsb = opts?.resetUsb === true
+    if (resetUsb) {
+      try {
+        await vendorOut(device, SIO_RESET_REQUEST, SIO_RESET_SIO)
+        await vendorOut(device, SIO_RESET_REQUEST, SIO_RESET_PURGE_RX)
+        await vendorOut(device, SIO_RESET_REQUEST, SIO_RESET_PURGE_TX)
+      } catch {
+        // pipe already dead
+      }
+      try {
+        if (typeof device.reset === 'function') await device.reset()
+      } catch {
+        // WinUSB already gone
+      }
+    } else if (device.opened) {
+      try {
+        await applyGpio(device, iceprogReleaseBus())
+      } catch {
+        // already gone
+      }
     }
     try {
       await device.releaseInterface(0)
@@ -195,7 +212,7 @@ export const mpsse: Ice40Mpsse = {
     } catch {
       // already closed
     }
-    if (typeof device.forget === 'function') {
+    if (forget && typeof device.forget === 'function') {
       try {
         await device.forget()
       } catch {
@@ -360,15 +377,22 @@ export const mpsse: Ice40Mpsse = {
 
   async flashRead(device, addr, count) {
     if (count <= 0) return new Uint8Array()
-    await csAssert(device)
-    const payload = new Uint8Array(4 + count)
-    payload[0] = FLASH_READ
-    payload[1] = (addr >> 16) & 0xff
-    payload[2] = (addr >> 8) & 0xff
-    payload[3] = addr & 0xff
-    const rx = await spiWriteRead(device, payload)
-    await csDeassert(device)
-    return rx.subarray(4)
+    const out = new Uint8Array(count)
+    let off = 0
+    for (const n of flashReadSliceSizes(count)) {
+      await csAssert(device)
+      const payload = new Uint8Array(4 + n)
+      payload[0] = FLASH_READ
+      const at = addr + off
+      payload[1] = (at >> 16) & 0xff
+      payload[2] = (at >> 8) & 0xff
+      payload[3] = at & 0xff
+      const rx = await spiWriteRead(device, payload)
+      out.set(rx.subarray(4), off)
+      off += n
+      await csDeassert(device)
+    }
+    return out
   },
 
   async flashRead8(device, addr) {

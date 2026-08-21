@@ -33,6 +33,7 @@ services:
       dockerfile: web/Dockerfile
       args:
         VITE_COMPILE_BACKEND: ${COMPILE_BACKEND:-yowasp}
+        VITE_ALLOWED_IMPORT_EXTENSIONS: ${ALLOWED_IMPORT_EXTENSIONS:-v,pcf,txt}
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-9090}:80"

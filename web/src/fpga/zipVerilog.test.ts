@@ -70,24 +70,42 @@ function storedZip(entries: { name: string; content: string }[]): ArrayBuffer {
   return out.buffer
 }
 
-test('verilogFilesFromZip keeps only .v and uses basename', async () => {
+test('verilogFilesFromZip keeps allowed extensions and uses basename', async () => {
   const buf = storedZip([
     { name: 'src/and2.v', content: 'module and2; endmodule\n' },
+    { name: 'board/pins.pcf', content: 'set_io led 1\n' },
+    { name: 'data/rom.txt', content: '00 01 02\n' },
     { name: 'readme.md', content: 'no' },
     { name: 'top.v', content: 'module top; endmodule\n' },
   ])
   const files = await verilogFilesFromZip(buf)
   assert.deepEqual(
     files.map((f) => f.name),
-    ['and2.v', 'top.v'],
+    ['and2.v', 'pins.pcf', 'rom.txt', 'top.v'],
   )
   assert.equal(files[0]?.content.includes('and2'), true)
+  assert.equal(files[1]?.content.includes('set_io'), true)
+  assert.equal(files[2]?.content.includes('00 01'), true)
 })
 
-test('verilogFilesToZip round-trips every tab', async () => {
+test('verilogFilesFromZip respects custom allowedExtensions parameter', async () => {
+  const buf = storedZip([
+    { name: 'src/and2.v', content: 'module and2; endmodule\n' },
+    { name: 'board/pins.pcf', content: 'set_io led 1\n' },
+    { name: 'data/rom.txt', content: '00 01 02\n' },
+  ])
+  const files = await verilogFilesFromZip(buf, ['pcf'])
+  assert.deepEqual(
+    files.map((f) => f.name),
+    ['pins.pcf'],
+  )
+})
+
+test('verilogFilesToZip round-trips every tab including .pcf and .txt', async () => {
   const tabs = [
     { name: 'azukar_lab.v', content: 'module azukar_lab; endmodule\n' },
-    { name: 'and2.v', content: 'module and2; endmodule\n' },
+    { name: 'pins.pcf', content: 'set_io clk 35\n' },
+    { name: 'mem.txt', content: 'DEADBEEF\n' },
   ]
   const zip = verilogFilesToZip(tabs)
   const back = await verilogFilesFromZip(zip.buffer.slice(0))

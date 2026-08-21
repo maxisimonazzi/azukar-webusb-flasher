@@ -1,7 +1,7 @@
 /** Lab starters keyed by board id. CLK / buttons / LEDs follow each PCF. */
 
-import { isCustomBoardId } from '@/fpga/boardTypes'
-import type { FpgaFile } from '@/fpga/files'
+import { isCustomBoardId } from './boardTypes.ts'
+import type { FpgaFile } from './files.ts'
 
 export const BLINKY_TOP = 'top_module'
 
