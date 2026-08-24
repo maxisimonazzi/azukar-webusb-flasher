@@ -79,6 +79,7 @@ type FpgaMenu = 'flash' | 'sram' | 'read' | 'eeprom'
 type UsbAction =
   | 'connect'
   | 'disconnect'
+  | 'reconnect'
   | 'program'
   | 'sram'
   | 'erase'
@@ -107,6 +108,7 @@ const logText = ref('')
 const busyCompile = ref(false)
 const usbAction = ref<UsbAction | null>(null)
 const boardConnected = ref(false)
+const lastUsbFail = ref<import('@/fpga/usbErrors').UsbFailKind | null>(null)
 const uploadThen = ref<UploadThen | null>(null)
 const progressDone = ref(0)
 const progressTotal = ref(0)
@@ -147,6 +149,10 @@ const dropMenuEnd = `${dropMenu} right-0`
 const dropItem =
   'block w-full whitespace-nowrap px-3 py-2 text-left text-sm text-fg hover:bg-surface-2'
 const usbBusy = computed(() => usbAction.value != null)
+const showReconnect = computed(() => {
+  const k = lastUsbFail.value
+  return !usbBusy.value && (k === 'short_read' || k === 'winusb' || k === 'timeout')
+})
 const uiLocked = computed(() => busyCompile.value)
 const progressPct = computed(() => {
   if (progressTotal.value <= 0) return 0
@@ -659,6 +665,7 @@ function needWebUsb(): boolean {
 function usbCatch(label: string, err: unknown) {
   const msg = err instanceof Error ? err.message : String(err)
   const kind = classifyUsbError(msg)
+  lastUsbFail.value = kind
   const key = usbBannerKey(kind)
   if (key == null) {
     appendLog(t('fpga.noUsbDevice'))
@@ -679,6 +686,7 @@ function downloadNamed(name: string, blob: Blob) {
 
 async function runUsb(action: UsbAction, fn: () => Promise<void>) {
   if (!needWebUsb()) return
+  lastUsbFail.value = null
   usbAction.value = action
   progressDone.value = 0
   progressTotal.value = 0
@@ -809,6 +817,14 @@ async function onReadEeprom(dest: DumpDest) {
 
 async function onDisconnect() {
   await runUsb('disconnect', () => disconnectMpsse(appendLog))
+}
+
+async function onReconnect() {
+  appendLog(t('fpga.reconnecting'))
+  await runUsb('reconnect', async () => {
+    await closeMpsseSession({ forget: false, resetUsb: true })
+    await connectMpsse(appendLog)
+  })
 }
 
 function onChooseUpload() {
@@ -1190,6 +1206,17 @@ onBeforeUnmount(() => {
                   @click="onDisconnect"
                 >
                   {{ usbAction === 'disconnect' ? t('fpga.closingProgrammer') : t('fpga.disconnectProgrammer') }}
+                </AppButton>
+                <AppButton
+                  v-if="showReconnect"
+                  size="sm"
+                  variant="outline"
+                  :class="slimBtn"
+                  :disabled="usbBusy"
+                  :title="t('fpga.reconnectHint')"
+                  @click="onReconnect"
+                >
+                  {{ usbAction === 'reconnect' ? t('fpga.reconnecting') : t('fpga.reconnect') }}
                 </AppButton>
                 <button
                   type="button"

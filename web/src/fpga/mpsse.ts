@@ -62,6 +62,20 @@ function vendorOut(
   })
 }
 
+/**
+ * Purge FTDI RX and TX buffers.  After a short-read stall (common on
+ * Windows 10 WinUSB), old data may sit in the FTDI FIFO.  Purging before
+ * a retry avoids reading stale bytes on the next transferIn.
+ */
+async function purgeBuffers(device: USBDevice): Promise<void> {
+  await vendorOut(device, SIO_RESET_REQUEST, SIO_RESET_PURGE_RX)
+  await vendorOut(device, SIO_RESET_REQUEST, SIO_RESET_PURGE_TX)
+}
+
+function isShortRead(err: unknown): boolean {
+  return err instanceof Error && /short FTDI read/.test(err.message)
+}
+
 async function send(device: USBDevice, bytes: number[]): Promise<void> {
   await device.transferOut(OUT_EP, new Uint8Array(bytes))
 }
@@ -380,17 +394,36 @@ export const mpsse: Ice40Mpsse = {
     const out = new Uint8Array(count)
     let off = 0
     for (const n of flashReadSliceSizes(count)) {
-      await csAssert(device)
+      const at = addr + off
       const payload = new Uint8Array(4 + n)
       payload[0] = FLASH_READ
-      const at = addr + off
       payload[1] = (at >> 16) & 0xff
       payload[2] = (at >> 8) & 0xff
       payload[3] = at & 0xff
-      const rx = await spiWriteRead(device, payload)
+
+      let rx: Uint8Array
+      try {
+        await csAssert(device)
+        rx = await spiWriteRead(device, payload)
+        await csDeassert(device)
+      } catch (err) {
+        if (!isShortRead(err)) throw err
+        // Windows 10 WinUSB short-read: purge + retry once
+        try {
+          await purgeBuffers(device)
+          await csDeassert(device)
+          await sleep(10)
+          await csAssert(device)
+          rx = await spiWriteRead(device, payload)
+          await csDeassert(device)
+        } catch (retryErr) {
+          // Retry also failed — throw the original for better diagnostics
+          throw err
+        }
+      }
+
       out.set(rx.subarray(4), off)
       off += n
-      await csDeassert(device)
     }
     return out
   },

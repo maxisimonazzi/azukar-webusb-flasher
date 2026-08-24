@@ -24,3 +24,9 @@ test('picker cancel has no red banner; others get short copy keys', () => {
   assert.equal(usbBannerKey('claim'), 'fpga.usbClaim')
   assert.equal(usbBannerKey('unknown'), 'fpga.usbUnknown')
 })
+
+test('short FTDI read (Win10 WinUSB truncated packet) maps to short_read', () => {
+  assert.equal(classifyUsbError('short FTDI read: got 66 of 68'), 'short_read')
+  assert.equal(classifyUsbError('short FTDI read: got 0 of 62'), 'short_read')
+  assert.equal(usbBannerKey('short_read'), 'fpga.usbShortRead')
+})

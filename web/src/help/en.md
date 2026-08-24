@@ -47,6 +47,12 @@ Each **Program** action has two entries: the `.bin` you just compiled, or **uplo
 
 Channel A must be **WinUSB** for WebUSB. Zadig → Options → List All Devices → `USB Serial Converter A` (Interface 0) → WinUSB. Not libusbK. **Do not change the driver on channel B** (UART). Close iceprog, Diamond Programmer, and any terminal holding the COM port.
 
+**Windows 10 — flash reads.** On some Windows 10 USB host controllers, reading the flash may fail with "short USB packet". If this happens:
+
+1. Try the **Reconnect USB** button that appears after the error. It resets the USB pipe without reinstalling the driver.
+2. If that is not enough, **unplug the board, wait a few seconds, and plug it back in**. You do not need to run Zadig again.
+3. If it keeps failing, try a **different USB port** (rear panel, no hub). Compiling and flashing/SRAM do not use this path and should still work.
+
 Linux and macOS usually work without Zadig. WebUSB needs HTTPS (or localhost).
 
 Firefox has no WebUSB: you can edit and compile, but not flash.

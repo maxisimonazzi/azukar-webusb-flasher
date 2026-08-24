@@ -47,6 +47,12 @@ Cada **Grabar** tiene dos entradas: el `.bin` que acabás de compilar, o **subir
 
 El canal A del FTDI tiene que estar en **WinUSB** para WebUSB. Zadig → Options → List All Devices → `USB Serial Converter A` (Interface 0) → WinUSB. No libusbK. **No le cambies el driver al canal B** (UART). Cerrá iceprog, Diamond Programmer y cualquier terminal que tenga tomado el COM.
 
+**Windows 10 — lectura de flash.** En algunos controladores USB de Windows 10, leer la flash puede fallar con "paquete USB corto". Si pasa:
+
+1. Probá el botón **Reconectar USB** que aparece después del error. Resetea el pipe sin reinstalar el driver.
+2. Si no alcanza, **desenchufá la placa, esperá unos segundos, y volvé a enchufar**. No hace falta correr Zadig de nuevo.
+3. Si sigue fallando, probá **otro puerto USB** (trasero, sin hub). Compilar y grabar la flash/SRAM no usan este camino y deberían andar igual.
+
 Linux y macOS suelen andar sin Zadig. Hace falta HTTPS (o localhost) para WebUSB.
 
 Firefox no tiene WebUSB: podés editar y compilar, pero no grabar.

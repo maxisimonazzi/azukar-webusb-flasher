@@ -4,6 +4,7 @@ export type UsbFailKind =
   | 'picker_cancel'
   | 'claim'
   | 'winusb'
+  | 'short_read'
   | 'denied'
   | 'unplugged'
   | 'timeout'
@@ -15,6 +16,7 @@ export type UsbFailKind =
 export type UsbBannerKey =
   | 'fpga.usbClaim'
   | 'fpga.usbWinusb'
+  | 'fpga.usbShortRead'
   | 'fpga.usbDenied'
   | 'fpga.usbUnplugged'
   | 'fpga.usbTimeout'
@@ -35,6 +37,7 @@ export function classifyUsbError(msg: string): UsbFailKind {
   }
   if (/webusb vive|need_web_usb|navigator\.usb/.test(m)) return 'no_webusb'
   if (/claim interface|unable to claim/.test(m)) return 'claim'
+  if (/short ftdi read/.test(m)) return 'short_read'
   if (/controltransferout|transfer error|networkerror|not functioning|winusb/.test(m)) {
     return 'winusb'
   }
@@ -55,6 +58,8 @@ export function usbBannerKey(kind: UsbFailKind): UsbBannerKey | null {
       return 'fpga.usbClaim'
     case 'winusb':
       return 'fpga.usbWinusb'
+    case 'short_read':
+      return 'fpga.usbShortRead'
     case 'denied':
       return 'fpga.usbDenied'
     case 'unplugged':
