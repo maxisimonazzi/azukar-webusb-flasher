@@ -1,14 +1,9 @@
 import { buildCompileJob, type CompileBoard, type CompileFile } from '@/fpga/compileArgs'
 import type { WorkerIn, WorkerOut } from '@/fpga/compileProtocol'
+import { elapsedLine, nowMs } from '@/fpga/elapsed'
 import { i18n } from '@/i18n'
 
 export type { CompileBoard, CompileFile }
-
-export type CompileBackend = 'server' | 'yowasp'
-
-export function compileBackend(): CompileBackend {
-  return import.meta.env.VITE_COMPILE_BACKEND === 'server' ? 'server' : 'yowasp'
-}
 
 export type CompileResult = {
   status: 'success' | 'compile_error'
@@ -26,51 +21,6 @@ function getWorker(): Worker {
     worker = new Worker(new URL('./yowaspWorker.ts', import.meta.url), { type: 'module' })
   }
   return worker
-}
-
-function b64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64)
-  const out = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
-  return out
-}
-
-async function compileOnServer(
-  files: CompileFile[],
-  top: string,
-  board: CompileBoard,
-  onLog?: CompileLogFn,
-): Promise<CompileResult> {
-  const res = await fetch('/compile', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      top,
-      files,
-      board: 'custom',
-      device: board.device,
-      package: board.package,
-      pcf: board.pcf,
-    }),
-  })
-  if (res.status === 409) throw new Error('COMPILE_BUSY')
-  if (res.status === 413) throw new Error('COMPILE_TOO_LARGE')
-  if (!res.ok) throw new Error(`Compile HTTP ${res.status}`)
-  const payload = (await res.json()) as {
-    status?: string
-    log?: string
-    bin_b64?: string | null
-  }
-  const status = payload.status === 'success' ? 'success' : 'compile_error'
-  const log = typeof payload.log === 'string' ? payload.log : ''
-  const bin =
-    status === 'success' && typeof payload.bin_b64 === 'string' && payload.bin_b64
-      ? b64ToBytes(payload.bin_b64)
-      : null
-  if (onLog && log) {
-    for (const line of log.split('\n')) onLog(line)
-  }
-  return { status, log, bin }
 }
 
 function compileInBrowser(
@@ -134,10 +84,14 @@ export async function compileFpga(
 ): Promise<CompileResult> {
   if (compiling) throw new Error('COMPILE_BUSY')
   compiling = true
+  const t0 = nowMs()
+  let failed = true
   try {
-    if (compileBackend() === 'server') return await compileOnServer(files, top, board, onLog)
-    return await compileInBrowser(files, top, board, onLog)
+    const result = await compileInBrowser(files, top, board, onLog)
+    failed = false
+    return result
   } finally {
     compiling = false
+    onLog?.(elapsedLine('Compilar', nowMs() - t0, { failed }))
   }
 }

@@ -11,6 +11,9 @@ import { verilog } from '@codemirror/legacy-modes/mode/verilog'
  */
 const indentOnInput = /^\s*(?:end\w*|join(?:_any|_none)?|else)\b/
 
+/** Gramática del editor según la extensión del archivo abierto. */
+export type EditorLanguage = 'verilog' | 'pcf' | 'plain'
+
 /**
  * The stock CM5 Verilog mode paints every identifier as `variable`.
  * VS Code's grammar tags `flip_flop_d u0 (` as an instantiation. We look
@@ -87,5 +90,33 @@ export const verilogLanguage = StreamLanguage.define({
   languageData: {
     ...verilog.languageData,
     indentOnInput,
+  },
+})
+
+/**
+ * Constraint file de nextpnr (`.pcf`): `set_io -nowarn LED0 45 # output`.
+ * Alcanza con un modo por línea: comentario `#`, comando, flag, nombre y pin.
+ */
+export const pcfLanguage = StreamLanguage.define({
+  name: 'pcf',
+  token(stream) {
+    if (stream.eatSpace()) return null
+    if (stream.match(/^#.*/)) return 'pcfComment'
+    if (stream.match(/^set_(?:io|frequency)\b/)) return 'pcfCommand'
+    if (stream.match(/^--?[A-Za-z][\w-]*/)) return 'pcfFlag'
+    if (stream.match(/^[0-9]+\b/)) return 'pcfPin'
+    if (stream.match(/^[A-Za-z_][\w$.:-]*(?:\[[0-9]+\])?/)) return 'pcfName'
+    stream.next()
+    return null
+  },
+  tokenTable: {
+    pcfComment: tags.comment,
+    pcfCommand: tags.keyword,
+    pcfFlag: tags.meta,
+    pcfPin: tags.number,
+    pcfName: tags.variableName,
+  },
+  languageData: {
+    commentTokens: { line: '#' },
   },
 })

@@ -23,6 +23,31 @@ export function isFpgaFilename(name: string): boolean {
   return FPGA_NAME_RE.test(name)
 }
 
+/** Nombre por defecto del constraint file del proyecto. */
+export const PROJECT_PCF = 'pins.pcf'
+
+export const FPGA_PCF_RE = /^[A-Za-z_][A-Za-z0-9_-]*\.pcf$/i
+
+export function isPcfFilename(name: string): boolean {
+  return FPGA_PCF_RE.test(name)
+}
+
+/** Lo que impide compilar: ningún `.pcf` en el proyecto, o más de uno. */
+export type PcfIssue = { kind: 'none' } | { kind: 'many'; names: string[] }
+
+export type PcfPick<T> = { kind: 'ok'; file: T } | PcfIssue
+
+/**
+ * El `.pcf` que se le pasa a nextpnr. Tiene que haber exactamente uno en el
+ * proyecto: con ninguno o con varios no adivina, avisa.
+ */
+export function pickPcfFile<T extends { name: string }>(files: T[]): PcfPick<T> {
+  const found = files.filter((f) => isPcfFilename(f.name))
+  if (found.length > 1) return { kind: 'many', names: found.map((f) => f.name) }
+  const only = found[0]
+  return only ? { kind: 'ok', file: only } : { kind: 'none' }
+}
+
 export function isAllowedFilename(
   name: string,
   allowedExts: string[] = getAllowedImportExtensions(),

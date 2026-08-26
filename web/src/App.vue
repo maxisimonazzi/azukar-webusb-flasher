@@ -7,9 +7,11 @@ import PaletteSelector from '@/components/PaletteSelector.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import BoardHelpModal from '@/components/BoardHelpModal.vue'
 import BoardSelector from '@/components/BoardSelector.vue'
+import ConfirmModal from '@/components/ConfirmModal.vue'
 import CustomBoardModal from '@/components/CustomBoardModal.vue'
 import ExportProjectModal from '@/components/ExportProjectModal.vue'
 import HelpModal from '@/components/HelpModal.vue'
+import PcfIssueModal from '@/components/PcfIssueModal.vue'
 import { setActiveBoard } from '@/fpga/activeBoard'
 import {
   customBoardProfiles,
@@ -24,20 +26,25 @@ import {
   type BoardProfile,
   type CustomBoardDraft,
 } from '@/fpga/boardTypes'
-import { compileBackend, compileFpga, type CompileBoard } from '@/fpga/compile'
+import { compileFpga, type CompileBoard } from '@/fpga/compile'
 import {
   addFpgaFile,
   binDownloadName,
   closeFpgaTab,
   deleteFpgaFile,
   getAllowedImportExtensions,
+  isPcfFilename,
   normalizeFpgaFilename,
   openFpgaTab,
+  pickPcfFile,
   projectZipDownloadName,
+  PROJECT_PCF,
   renameFpgaFile,
   visibleFpgaTabs,
+  type PcfIssue,
 } from '@/fpga/files'
 import { FLASH_CONSOLE_BYTES, formatHexDump, toIntelHex } from '@/fpga/flashDump'
+import { clearProject, loadProject, saveProject } from '@/fpga/projectStore'
 import { trimIce40Image } from '@/fpga/flashPlan'
 import {
   closeMpsseSession,
@@ -46,12 +53,17 @@ import {
   eraseIce40Flash,
   onMpsseConnectionChange,
   programIce40Flash,
-  programIce40Sram,
+  bitbangIce40Sram,
   readFtdiConfigEeprom,
   readIce40Flash,
   resetIce40FromFlash,
 } from '@/fpga/programmer'
-import { BLINKY_TOP, cloneStarterFiles, filesMatchStarter, starterForBoard } from '@/fpga/starter'
+import {
+  BLINKY_TOP,
+  cloneStarterFiles,
+  filesMatchStarter,
+  projectStarter,
+} from '@/fpga/starter'
 import {
   UART_BAUD_DEFAULT,
   UART_BAUDS,
@@ -63,6 +75,7 @@ import {
 import { classifyUsbError, usbBannerKey } from '@/fpga/usbErrors'
 import { verilogFilesFromZip, verilogFilesToZip } from '@/fpga/zipVerilog'
 import { isFirefox, WEBSERIAL_FIREFOX_ADDON_URL } from '@/lib/isFirefox'
+import type { EditorLanguage } from '@/lib/verilogEditor'
 import { readSession, writeSession } from '@/lib/storage'
 import {
   EDITOR_FONT_MAX,
@@ -93,16 +106,23 @@ const { t, locale } = useI18n()
 const isDark = computed(() => themeRef.value === 'dark')
 const initialBoard = resolveBoard(loadBoardId())
 setActiveBoard(initialBoard)
-const initialStarter = starterForBoard(initialBoard.id)
+const initialStarter = projectStarter(initialBoard)
+const savedProject = loadProject()
 const boardId = ref(initialBoard.id)
 const customBoards = ref(customBoardProfiles())
 const customDraft = ref<CustomBoardDraft>(emptyCustomDraft())
 const helpBoard = ref<BoardProfile | null>(null)
 const showHelp = ref(false)
 const showCustomModal = ref(false)
-const files = ref(cloneStarterFiles(initialStarter))
-const activeName = ref(initialStarter.files[0]?.name ?? 'top_module.v')
-const top = ref(initialStarter.top)
+const files = ref(
+  savedProject ? savedProject.files.map((f) => ({ ...f })) : cloneStarterFiles(initialStarter),
+)
+const activeName = ref(
+  savedProject?.activeName || initialStarter.files[0]?.name || 'top_module.v',
+)
+const top = ref(savedProject?.top.trim() ? savedProject.top : initialStarter.top)
+const pcfIssue = ref<PcfIssue | null>(null)
+const showResetConfirm = ref(false)
 const bin = shallowRef<Uint8Array | null>(null)
 const logText = ref('')
 const busyCompile = ref(false)
@@ -168,6 +188,11 @@ const openTabs = computed(() => visibleFpgaTabs(files.value))
 const activeFile = computed(
   () => files.value.find((f) => f.name === activeName.value && f.open) ?? null,
 )
+const editorLanguage = computed<EditorLanguage>(() => {
+  const name = activeFile.value?.name ?? ''
+  if (isPcfFilename(name)) return 'pcf'
+  return name.toLowerCase().endsWith('.v') ? 'verilog' : 'plain'
+})
 const lineCount = computed(() => {
   const text = activeFile.value?.content ?? ''
   if (!text) return 0
@@ -452,30 +477,31 @@ function clearBin() {
   }
 }
 
+/** Perfil de la placa activa. Computed: `resolveBoard` lee localStorage. */
+const activeBoard = computed<BoardProfile>(() => resolveBoard(boardId.value))
+
 function activeProfile(): BoardProfile {
-  return resolveBoard(boardId.value)
+  return activeBoard.value
 }
 
-function compileBoardPayload(): CompileBoard | null {
+function compileBoardPayload(): CompileBoard {
   const board = activeProfile()
-  if (!board.pcfText.trim()) return null
   return {
     device: board.fpga.nextpnr_device,
     package: board.fpga.nextpnr_package,
-    pcf: board.pcfText,
   }
 }
 
 function applyBoard(id: string) {
   const prev = activeProfile()
   const next = resolveBoard(id)
-  const keep = filesMatchStarter(files.value, starterForBoard(prev.id))
+  const keep = filesMatchStarter(files.value, projectStarter(prev))
   boardId.value = next.id
   saveBoardId(next.id)
   setActiveBoard(next)
   clearBin()
   if (keep) {
-    const starter = starterForBoard(next.id)
+    const starter = projectStarter(next)
     files.value = cloneStarterFiles(starter)
     activeName.value = starter.files[0]?.name ?? 'top_module.v'
     top.value = starter.top
@@ -493,6 +519,37 @@ function onBoardHelp(id: string) {
   helpBoard.value = resolveBoard(id)
 }
 
+/** Agrega el PCF de la placa activa al proyecto, como `pins.pcf`. */
+function addBoardPcfToProject() {
+  const board = activeProfile()
+  const text = board.starterPcf
+  pcfIssue.value = null
+  if (!text.trim()) return
+  const exists = files.value.some((f) => f.name === PROJECT_PCF)
+  files.value = exists
+    ? files.value.map((f) => (f.name === PROJECT_PCF ? { ...f, content: text, open: true } : f))
+    : [...files.value, { name: PROJECT_PCF, content: text, open: true }]
+  activeName.value = PROJECT_PCF
+  appendLog(t('board.pcfCopied', { name: PROJECT_PCF, board: board.title }))
+}
+
+function askResetProject() {
+  showResetConfirm.value = true
+}
+
+/** Vuelve al laboratorio de la placa activa y borra lo guardado en el browser. */
+function resetProject() {
+  const starter = projectStarter(activeProfile())
+  files.value = cloneStarterFiles(starter)
+  activeName.value = starter.files[0]?.name ?? PROJECT_PCF
+  top.value = starter.top
+  clearBin()
+  clearProject()
+  showResetConfirm.value = false
+  pcfIssue.value = null
+  appendLog(t('fpga.projectResetDone'))
+}
+
 function openCustomModal() {
   customDraft.value = emptyCustomDraft()
   showCustomModal.value = true
@@ -508,7 +565,13 @@ function onCustomSave(draft: CustomBoardDraft) {
   applyBoard(stored.id)
 }
 
-type CompileFailCode = 'COMPILE_BUSY' | 'COMPILE_TOO_LARGE' | 'COMPILE_BAD_INPUT' | 'COMPILE_WORKER'
+type CompileFailCode =
+  | 'COMPILE_BUSY'
+  | 'COMPILE_TOO_LARGE'
+  | 'COMPILE_BAD_INPUT'
+  | 'COMPILE_NO_PCF'
+  | 'COMPILE_MANY_PCF'
+  | 'COMPILE_WORKER'
 type UartFailCode = 'NEED_WEB_SERIAL' | 'UART_NO_READABLE'
 
 function isCompileFailCode(msg: string): msg is CompileFailCode {
@@ -516,6 +579,8 @@ function isCompileFailCode(msg: string): msg is CompileFailCode {
     msg === 'COMPILE_BUSY' ||
     msg === 'COMPILE_TOO_LARGE' ||
     msg === 'COMPILE_BAD_INPUT' ||
+    msg === 'COMPILE_NO_PCF' ||
+    msg === 'COMPILE_MANY_PCF' ||
     msg === 'COMPILE_WORKER'
   )
 }
@@ -534,6 +599,10 @@ function compileErrorMessage(err: unknown): string {
       return t('fpga.compileTooLarge')
     case 'COMPILE_BAD_INPUT':
       return t('fpga.compileBadInput')
+    case 'COMPILE_NO_PCF':
+      return t('fpga.compileNoPcf', { name: PROJECT_PCF })
+    case 'COMPILE_MANY_PCF':
+      return t('fpga.compileManyPcf')
     case 'COMPILE_WORKER':
       return t('fpga.compileWorker')
     default: {
@@ -576,15 +645,8 @@ async function onCompile() {
   showNoBin.value = false
   if (busyCompile.value) return
   const payload = compileBoardPayload()
-  if (!payload) {
-    appendLog(t('board.needPcf'))
-    showCustomModal.value = true
-    return
-  }
   busyCompile.value = true
-  appendLog(
-    compileBackend() === 'yowasp' ? t('fpga.compileQueuedBrowser') : t('fpga.compileQueuedServer'),
-  )
+  appendLog(t('fpga.compileQueuedBrowser'))
   try {
     const result = await compileFpga(
       files.value.map((f) => ({ name: f.name, content: f.content })),
@@ -601,6 +663,12 @@ async function onCompile() {
     }
   } catch (err) {
     appendLog(compileErrorMessage(err))
+    // Sin .pcf (o con varios) no hay compile: el modal explica y ofrece el de la placa.
+    const code = err instanceof Error ? err.message : ''
+    if (code === 'COMPILE_NO_PCF' || code === 'COMPILE_MANY_PCF') {
+      const pick = pickPcfFile(files.value)
+      pcfIssue.value = pick.kind === 'ok' ? { kind: 'none' } : pick
+    }
   } finally {
     busyCompile.value = false
   }
@@ -713,8 +781,15 @@ async function doSram() {
   if (!bin.value) return
   showNoBin.value = false
   await runUsb('sram', async () => {
-    const stats = await programIce40Sram(bin.value!, appendLog, onProgress)
-    if (!stats.cdone) appendLog(t('fpga.sramCdoneLow'))
+    // El bitbang por ADBUS2 en modo bitbang del FTDI es el camino rápido y el
+    // que funciona. Si fallara (otra placa, otro FTDI), reintentamos por GPIO
+    // del MPSSE, que es más lento pero no cambia de modo.
+    let r = await bitbangIce40Sram(bin.value!, appendLog, onProgress, { fast: true })
+    if (!r.cdone && r.adbus2Drives) {
+      appendLog(t('fpga.sramRetryMpsse'))
+      r = await bitbangIce40Sram(bin.value!, appendLog, onProgress, { fast: false })
+    }
+    if (!r.cdone) appendLog(t('fpga.sramCdoneLow'))
   })
 }
 
@@ -871,11 +946,43 @@ function onFile(ev: Event) {
   })
 }
 
+// El proyecto vive en el browser: si no queda en localStorage, se pierde al recargar.
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+let warnedProjectTooBig = false
+
+function persistProject() {
+  saveTimer = null
+  const ok = saveProject({
+    top: top.value,
+    activeName: activeName.value,
+    files: files.value.map((f) => ({ name: f.name, content: f.content, open: f.open })),
+  })
+  if (ok || warnedProjectTooBig) return
+  warnedProjectTooBig = true
+  appendLog(t('fpga.projectTooBig'))
+}
+
+function scheduleProjectSave() {
+  if (saveTimer != null) clearTimeout(saveTimer)
+  saveTimer = setTimeout(persistProject, 400)
+}
+
+function flushProjectSave() {
+  if (saveTimer == null) return
+  clearTimeout(saveTimer)
+  persistProject()
+}
+
+watch([files, top, activeName], scheduleProjectSave, { deep: true })
+
 onMounted(() => {
   stopConnectionWatch = onMpsseConnectionChange((open) => {
     boardConnected.value = open
   })
   document.addEventListener('pointerdown', onPointerDownAway)
+  window.addEventListener('beforeunload', flushProjectSave)
+  if (savedProject) appendLog(t('fpga.projectRestored', { n: savedProject.files.length }))
+  scheduleProjectSave()
   if (!isFirefox()) return
   try {
     if (readSession(FIREFOX_NOTICE_KEY) === '1') return
@@ -887,6 +994,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onPointerDownAway)
+  window.removeEventListener('beforeunload', flushProjectSave)
+  flushProjectSave()
   stopConnectionWatch?.()
   if (logRaf != null) cancelAnimationFrame(logRaf)
   if (uartRaf != null) cancelAnimationFrame(uartRaf)
@@ -1122,6 +1231,19 @@ onBeforeUnmount(() => {
                   <path d="M5 20h14v-2H5v2zm7-18l-5 5h3v6h4V7h3l-5-5z" />
                 </svg>
               </button>
+              <button
+                type="button"
+                class="cursor-pointer rounded-md p-1.5 text-muted hover:bg-surface hover:text-error"
+                :title="t('fpga.resetProject')"
+                :aria-label="t('fpga.resetProject')"
+                @click="askResetProject"
+              >
+                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path
+                    d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"
+                  />
+                </svg>
+              </button>
               <span class="text-sm font-semibold text-fg">{{ lineCountLabel }}</span>
               <div class="flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1">
                 <button
@@ -1152,6 +1274,7 @@ onBeforeUnmount(() => {
               :key="activeName"
               :model-value="activeFile.content"
               :font-size="editorFontPx"
+              :language="editorLanguage"
               height-class="h-full min-h-0"
               @update:model-value="setActiveContent"
             />
@@ -1451,6 +1574,22 @@ onBeforeUnmount(() => {
     </div>
     <HelpModal :open="showHelp" @close="showHelp = false" />
     <BoardHelpModal :board="helpBoard" @close="helpBoard = null" />
+    <PcfIssueModal
+      :issue="pcfIssue"
+      :board-title="activeBoard.title"
+      :board-pcf="activeBoard.starterPcf"
+      :pcf-name="PROJECT_PCF"
+      @add="addBoardPcfToProject"
+      @close="pcfIssue = null"
+    />
+    <ConfirmModal
+      :open="showResetConfirm"
+      :title="t('fpga.resetProjectTitle')"
+      :body="t('fpga.resetProjectBody', { name: activeBoard.title })"
+      :confirm-label="t('fpga.resetProjectConfirm')"
+      @confirm="resetProject"
+      @close="showResetConfirm = false"
+    />
     <CustomBoardModal
       :open="showCustomModal"
       :initial="customDraft"

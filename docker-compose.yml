@@ -1,4 +1,4 @@
-# Un compose, un código. COMPILE_BACKEND en .env elige server vs yowasp (build).
+# Un compose, un servicio: la SPA con nginx. La síntesis corre en el navegador (YoWASP/WASM).
 #   copy .env.example .env
 #   docker compose up --build -d
 #
@@ -7,35 +7,12 @@
 name: lattice-yowasp
 
 services:
-  toolchain:
-    build:
-      context: .
-      dockerfile: toolchain/Dockerfile
-    restart: unless-stopped
-    mem_limit: 1g
-    pids_limit: 64
-    environment:
-      BOARD: azukar-v2
-      BOARDS_DIR: /boards
-      COMPILE_BIND: 0.0.0.0
-      COMPILE_PORT: 8090
-      COMPILE_TIMEOUT_SEC: "90"
-    volumes:
-      - ./boards:/boards:ro
-    tmpfs:
-      - /tmp:size=256m,mode=1777
-    expose:
-      - "8090"
-
   web:
     build:
       context: .
       dockerfile: web/Dockerfile
       args:
-        VITE_COMPILE_BACKEND: ${COMPILE_BACKEND:-yowasp}
         VITE_ALLOWED_IMPORT_EXTENSIONS: ${ALLOWED_IMPORT_EXTENSIONS:-v,pcf,txt}
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-9090}:80"
-    depends_on:
-      - toolchain

@@ -1,7 +1,30 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { ALHAMBRA_VERILOG, BLINKY_TOP, BLINKY_VERILOG, EDU_CIAA_VERILOG, FPGA_STARTER, UART_TX_VERILOG, starterForBoard } from './starter.ts'
+import { ICEPROG_ADBUS, type BoardProfile } from './boardTypes.ts'
+import { ALHAMBRA_VERILOG, BLINKY_TOP, BLINKY_VERILOG, EDU_CIAA_VERILOG, FPGA_STARTER, UART_TX_VERILOG, projectStarter, starterForBoard } from './starter.ts'
+
+function boardWithPcf(id: string, starterPcf: string): BoardProfile {
+  return {
+    id,
+    title: id,
+    kind: 'listed',
+    fpga: {
+      arch: 'ice40',
+      nextpnr_device: 'hx8k',
+      nextpnr_package: 'tq144:4k',
+      pcf: 'pins.pcf',
+    },
+    programmer: {
+      chip: 'FT2232H',
+      vid: 1027,
+      pid: 24592,
+      channel: 'A',
+      adbus: { ...ICEPROG_ADBUS },
+    },
+    starterPcf,
+  }
+}
 
 test('starter top is top_module and ships uart_tx as a second file', () => {
   assert.equal(BLINKY_TOP, 'top_module')
@@ -42,4 +65,23 @@ test('Alhambra II starter is a 4-bit counter, SW1 reset, SW2 NOT on LED4–7, UA
   assert.match(ALHAMBRA_VERILOG, /if \(!SW1\)/)
   assert.match(ALHAMBRA_VERILOG, /assign LED4 = ~SW2/)
   assert.equal(starter.files[0]?.content, ALHAMBRA_VERILOG)
+})
+
+test('projectStarter ships the board PCF as one more editable file', () => {
+  const pcf = 'set_io -nowarn LED0 1'
+  const starter = projectStarter(boardWithPcf('edu-ciaa-fpga', pcf))
+  assert.deepEqual(
+    starter.files.map((f) => f.name),
+    ['top_module.v', 'uart_tx.v', 'pins.pcf'],
+  )
+  assert.equal(starter.files[2]?.content, pcf)
+  assert.equal(starter.files.every((f) => f.open), true)
+})
+
+test('a board with no PCF template starts without pins.pcf', () => {
+  const starter = projectStarter(boardWithPcf('azukar-v2', '   '))
+  assert.deepEqual(
+    starter.files.map((f) => f.name),
+    ['top_module.v', 'uart_tx.v'],
+  )
 })

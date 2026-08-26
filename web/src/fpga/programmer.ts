@@ -4,7 +4,13 @@
  * Copyright (C) 2015 Claire Xenia Wolf, 2018 Piotr Esden-Tempski (ISC).
  * https://github.com/YosysHQ/icestorm — notice in web/public/THIRD_PARTY_NOTICES.md
  */
-import { FLASH_READ_MAX_DATA } from '@/fpga/ftdiUsb'
+import { FLASH_DUMP_CHUNK } from '@/fpga/ftdiUsb'
+import {
+  elapsedLine,
+  formatDuration,
+  formatThroughput,
+  nowMs,
+} from '@/fpga/elapsed'
 import { formatHexDump } from '@/fpga/flashDump'
 import {
   flashSizeFromJedec,
@@ -17,18 +23,23 @@ import {
   iceprogSramReleaseCs,
   iceprogSramSelect,
 } from '@/fpga/iceprogPins'
-import { mpsse } from '@/fpga/mpsse'
+import {
+  BITBANG_MODE_DEFAULTS,
+  type BitbangModeOptions,
+  type BitbangShiftStats,
+  bitbangModeSramShift,
+  bitbangSlaveEdge,
+  bitbangSramShift,
+  mpsse,
+  probeAdbus2Drive,
+} from '@/fpga/mpsse'
 import type {
   ProgramLog,
   ProgramProgress,
   ProgramStats,
-  SramProgramStats,
 } from '@/fpga/types'
 
-const FLASH_READ_CHUNK = FLASH_READ_MAX_DATA
-const SRAM_SPI_CHUNK = 4096
-const SRAM_DUMMY_FF = 7
-const SRAM_EXTRA_DUMMY_FF = 16
+const FLASH_READ_CHUNK = FLASH_DUMP_CHUNK
 
 type ConnectionListener = (connected: boolean) => void
 const listeners = new Set<ConnectionListener>()
@@ -64,7 +75,19 @@ async function step<T>(
 }
 
 function now(): number {
-  return typeof performance !== 'undefined' ? performance.now() : Date.now()
+  return nowMs()
+}
+
+/** Closing stopwatch line for a long task. Fires on success and on failure. */
+function logElapsed(
+  log: ProgramLog,
+  task: string,
+  t0: number,
+  opts?: { bytes?: number; failed?: boolean },
+): number {
+  const ms = now() - t0
+  log(elapsedLine(task, ms, opts))
+  return ms
 }
 
 function sleep(ms: number): Promise<void> {
@@ -219,6 +242,7 @@ export async function programIce40Flash(
       await mpsse.flashWriteEnable(device)
       await mpsse.flashBlockErase64k(device, addr)
       await mpsse.flashWait(device)
+
     }
     const tErase1 = now()
 
@@ -226,8 +250,7 @@ export async function programIce40Flash(
     let n = 0
     for (const page of plan.pages) {
       const chunk = payload.subarray(page.addr, page.addr + page.length)
-      await mpsse.flashWriteEnable(device)
-      await mpsse.flashProgPage(device, page.addr, chunk)
+      await mpsse.flashWriteEnableAndProgPage(device, page.addr, chunk)
       await mpsse.flashWait(device)
       n += 1
       onProgress?.(n, plan.pages.length, 'flash')
@@ -239,13 +262,15 @@ export async function programIce40Flash(
     }
     const tProg1 = now()
 
-    const probe = Math.min(256, payload.length)
+    // Leer pasó a costar ~200x menos, así que verificamos el bitstream entero
+    // y no los primeros 256 B, que casi no verificaban nada.
+    const tVerify0 = now()
     let same = true
     let failAt = -1
     let failWrote = new Uint8Array()
     let failRead = new Uint8Array()
-    for (let addr = 0; addr < probe; addr += FLASH_READ_CHUNK) {
-      const nRead = Math.min(FLASH_READ_CHUNK, probe - addr)
+    for (let addr = 0; addr < payload.length && same; addr += FLASH_READ_CHUNK) {
+      const nRead = Math.min(FLASH_READ_CHUNK, payload.length - addr)
       const readback = await mpsse.flashRead(device, addr, nRead)
       const expect = payload.subarray(addr, addr + nRead)
       if (readback.length !== nRead) {
@@ -259,20 +284,25 @@ export async function programIce40Flash(
         if (readback[i] !== expect[i]) {
           same = false
           failAt = addr + i
-          failWrote = expect
-          failRead = readback
+          failWrote = expect.subarray(i, i + 16)
+          failRead = readback.subarray(i, i + 16)
           break
         }
       }
-      if (!same) break
+      onProgress?.(Math.min(addr + nRead, payload.length), payload.length, 'read')
+      if (addr === 0) await sleep(0)
     }
+    const tVerify1 = now()
     if (same) {
-      log(`[mpsse] verify @0 OK (${probe} B) — ${hexBytes(payload, 16)}`)
+      log(
+        `[mpsse] verify OK — ${payload.length} B leídos y comparados byte a byte @0 ${hexBytes(payload, 16)}`,
+      )
     } else {
       log(
-        `[mpsse] verify FAIL @0x${failAt.toString(16)} (chunk wrote ${hexBytes(failWrote, 16)} read ${hexBytes(failRead, 16)})`,
+        `[mpsse] verify FAIL @0x${failAt.toString(16)} (esperaba ${hexBytes(failWrote, 16)} leyó ${hexBytes(failRead, 16)})`,
       )
     }
+    log(elapsedLine('Verificar flash', tVerify1 - tVerify0, { bytes: payload.length }))
 
     const cdoneHeld = await mpsse.fpgaGetCdone(device)
     log(
@@ -293,6 +323,7 @@ export async function programIce40Flash(
       `[mpsse] CDONE=${cdone}${cdone ? ' (FPGA configurada; LED DONE on)' : ' — timeout, revisá el .bin / el cable'}`,
     )
     const t1 = now()
+    log(elapsedLine('Grabar flash', t1 - t0, { bytes: payload.length }))
 
     const stats: ProgramStats = {
       flashIdHex,
@@ -310,6 +341,7 @@ export async function programIce40Flash(
     )
     return stats
   } catch (err) {
+    logElapsed(log, 'Grabar flash', t0, { failed: true })
     await closeMpsseSession()
     throw err
   }
@@ -324,36 +356,41 @@ async function pollCdone(device: USBDevice, tries = 20, gapMs = 20): Promise<0 |
   return cdone
 }
 
-async function logAdbus(device: USBDevice, log: ProgramLog, label: string): Promise<string> {
-  const pins = formatAdbusPins(await mpsse.readPins(device))
-  log(`[mpsse] SRAM ${label} ${pins}`)
-  return pins
+export type SramBitbangResult = {
+  /** El FT2232H nos dejo manejar ADBUS2 como salida. */
+  adbus2Drives: boolean
+  cdone: 0 | 1
+  bytes: number
 }
 
 /**
- * iceprog -S: clock the icepack image into CRAM as SPI slave.
- * Does not write the NOR. A later Reset reloads flash.
+ * Configuracion slave bit-bangueando el bitstream por ADBUS2. Verificado:
+ * levanta CDONE en el cableado de bus compartido tipo iCEstick.
  *
- * Shared ADBUS4 = flash /CS = FPGA SPI_SS_B, so the W25X40 also sees the
- * shift. We put it in 0xB9 deep power-down first; that is the software we
- * can do without cutting copper. No flash-boot fallback (that lies).
+ * Contexto en docs/sram-slave-bitbang-adbus2.md. Resumen: el motor de
+ * datos del MPSSE transmite solo por ADBUS1, que en este cableado comparte net
+ * con el SPI_SO de la FPGA (una salida). La entrada de configuracion de la FPGA
+ * (SPI_SI) esta en el net de ADBUS2. Este camino maneja ADBUS2 como GPIO y
+ * clockea el bitstream a mano.
+ *
+ * No escribe la flash. La manda a deep power-down para que su DO quede en alta
+ * impedancia y no pelee el net, y deja MOSI como entrada para no pelear con el
+ * SPI_SO de la FPGA.
  */
-export async function programIce40Sram(
+export async function bitbangIce40Sram(
   bin: Uint8Array,
   log: ProgramLog,
   onProgress?: ProgramProgress,
-): Promise<SramProgramStats> {
-  if (bin.length === 0) {
-    throw new Error('empty bitstream')
-  }
+  opts?: { fast?: boolean } & Partial<BitbangModeOptions>,
+): Promise<SramBitbangResult> {
+  const fast = opts?.fast === true
+  const modo: BitbangModeOptions = { ...BITBANG_MODE_DEFAULTS, ...opts }
+  // iceram.c sube SS despues del flanco para sacar la flash del bus; ahi no
+  // hace falta dormirla, y nos ahorramos el modo de falla "placa congelada".
+  const duermeFlash = !(fast && modo.raiseSsAfterEdge)
   const payload = trimIce40Image(bin)
   if (payload.length === 0) {
     throw new Error('ese .bin está vacío o es un dump de flash borrada (todo 0xFF)')
-  }
-  if (payload.length !== bin.length) {
-    log(
-      `[mpsse] SRAM recorté ${bin.length} → ${payload.length} B (0xFF al final)`,
-    )
   }
 
   const t0 = now()
@@ -361,104 +398,143 @@ export async function programIce40Sram(
 
   try {
     log(
-      `[mpsse] SRAM slave ${payload.length} B — iceprog -S (no toca la flash)`,
+      `[bitbang] slave por ADBUS2 — ${payload.length} B (no escribe la flash)` +
+        (fast ? ' — modo bitbang del FTDI' : ' — GPIO del MPSSE'),
     )
 
-    await step('SRAM CRESET=0 (FPGA en reset, flash idle)', log, () =>
+    // --- 0. ¿el chip nos deja manejar ADBUS2? --------------------------------
+    await step('CRESET=0 (FPGA en reset, suelta sus pines)', log, () =>
       mpsse.fpgaResetAssert(device),
     )
     await sleep(2)
+    const probe = await probeAdbus2Drive(device)
+    log(
+      `[bitbang] sonda ADBUS2: pedido 1 → leí 0x${probe.rawHigh.toString(16).padStart(2, '0')}` +
+        `, pedido 0 → leí 0x${probe.rawLow.toString(16).padStart(2, '0')}`,
+    )
+    if (!probe.drives) {
+      log(
+        '[bitbang] El MPSSE IGNORA el bit de dirección de ADBUS2: el pin quedó flotando en el pull-up.',
+      )
+      log(
+        '[bitbang] Este camino está cerrado. Queda el plan B: modo bitbang del FTDI (SIO_SET_BITMODE).',
+      )
+      await mpsse.flashReleasePowerDown(device)
+      await mpsse.fpgaResetDeassert(device)
+      logElapsed(log, 'Bit-bang SRAM', t0)
+      return { adbus2Drives: false, cdone: 0, bytes: payload.length }
+    }
+    log('[bitbang] ADBUS2 responde como salida. Seguimos.')
+
+    // --- 1. la flash fuera del camino ---------------------------------------
     await mpsse.flashReleasePowerDown(device)
     const id = await mpsse.flashReadId(device)
-    log(`[mpsse] SRAM JEDEC ${hexBytes(id)} — despierto la NOR para mandarla a sleep`)
-    await mpsse.flashPowerDown(device)
-    log(
-      '[mpsse] SRAM flash 0xB9 deep power-down — misma CS que SPI_SS_B; la NOR no debería interpretar el bitstream',
-    )
+    if (duermeFlash) {
+      await mpsse.flashPowerDown(device)
+      log(`[bitbang] flash JEDEC ${hexBytes(id)} → 0xB9 deep power-down (DO en alta Z)`)
+    } else {
+      log(
+        `[bitbang] flash JEDEC ${hexBytes(id)} — se queda despierta: SS sube tras el flanco`,
+      )
+    }
     await sleep(1)
 
-    await step('SRAM sramReset CS+CRESET=0', log, () => mpsse.sramReset(device))
+    // --- 2. reset y flanco de modo ------------------------------------------
+    await step('CS+CRESET=0 — sram_reset()', log, () => mpsse.sramReset(device))
     await sleep(2)
-    await logAdbus(device, log, 'tras sramReset')
 
-    await step('SRAM sramSelect CS=0 CRESET=1 (flanco slave)', log, () =>
-      mpsse.sramSelect(device),
-    )
-    await sleep(5)
-    const pinsAfterSelect = await logAdbus(
-      device,
-      log,
-      'tras sramSelect (esperaba CS=0 CRESET=1 CDONE=0)',
-    )
-
-    log(`[mpsse] SRAM shifting ${payload.length} bytes`)
-    for (let off = 0; off < payload.length; off += SRAM_SPI_CHUNK) {
-      const chunk = payload.subarray(
-        off,
-        Math.min(off + SRAM_SPI_CHUNK, payload.length),
+    const tShift = now()
+    let statsBitbang: BitbangShiftStats | null = null
+    if (fast) {
+      // El flanco de CRESET pasa a hacerse adentro del modo bitbang, para no
+      // depender de un cambio de modo justo en el momento que decide master
+      // contra slave.
+      log(
+        `[bitbang] ${payload.length} B por el generador de baudios ` +
+          `(~${Math.round((payload.length * 16) / 1024)} KB de estados de pines, ` +
+          `divisor 0x${modo.baudValue.toString(16).padStart(4, '0')})`,
       )
-      await mpsse.sramSend(device, chunk)
-      const done = off + chunk.length
-      onProgress?.(done, payload.length, 'sram')
-      if (off === 0 || done === payload.length || done % (SRAM_SPI_CHUNK * 8) === 0) {
-        log(`[mpsse] SRAM ${done}/${payload.length}`)
-      }
-    }
+      log(
+        `[bitbang] SCK en reposo ${modo.clockIdleHigh ? 'ALTO (modo 3)' : 'bajo (modo 0)'}` +
+          `, SS ${modo.raiseSsAfterEdge ? 'sube tras el flanco' : 'queda abajo'}` +
+          `, ${modo.pipelineDepth} transferOut en vuelo`,
+      )
+      statsBitbang = await bitbangModeSramShift(
+        device,
+        payload,
+        modo,
+        (done) => {
+          onProgress?.(done, payload.length, 'sram')
+        },
+      )
+    } else {
+      await step('CS=0 CRESET=1 con ADBUS2 como salida — flanco slave', log, () =>
+        bitbangSlaveEdge(device),
+      )
+      await sleep(5)
+      const pins = formatAdbusPins(await mpsse.readPins(device))
+      log(`[bitbang] tras el flanco (esperado CS=0 CRESET=1 CDONE=0): ${pins}`)
 
-    await mpsse.sramSend(device, new Uint8Array(SRAM_DUMMY_FF).fill(0xff))
-    await mpsse.sramDummyClocks(device)
-    log(
-      `[mpsse] SRAM dummy ${SRAM_DUMMY_FF}×0xFF + 49 clocks (SI=1, iceprog 6 B + 1 bit)`,
-    )
-
-    let cdone = await pollCdone(device)
-    if (!cdone) {
-      log('[mpsse] SRAM CDONE todavía 0 — más dummy y reintento')
-      await mpsse.sramSend(device, new Uint8Array(SRAM_EXTRA_DUMMY_FF).fill(0xff))
+      log(
+        `[bitbang] clockeando ${payload.length} B a mano (~${Math.round((payload.length * 48) / 1024)} KB de comandos MPSSE)`,
+      )
+      await bitbangSramShift(device, payload, (done) => {
+        onProgress?.(done, payload.length, 'sram')
+      })
       await mpsse.sramDummyClocks(device)
-      cdone = await pollCdone(device)
     }
-
-    await logAdbus(device, log, 'tras dummy')
-    const donePins = iceprogSramReleaseCs()
-    await step('SRAM suelto CS (CRESET sigue en 1, sin boot flash)', log, () =>
-      mpsse.setGpio(device, donePins.value, donePins.direction),
+    const shiftMs = now() - tShift
+    log(
+      `[bitbang] shift: ${formatDuration(shiftMs)} (${formatThroughput(payload.length, shiftMs)})`,
     )
-    await sleep(2)
-    cdone = await mpsse.fpgaGetCdone(device)
+    if (statsBitbang !== null) {
+      // La lectura que vale: tomada adentro del modo bitbang, antes de que
+      // cualquier cambio de modo pueda tocar CRESET.
+      log(
+        `[bitbang] pines leídos SIN salir del bitbang: ${formatAdbusPins(statsBitbang.pins)}`,
+      )
+      // Donde se va el tiempo: armar los estados en JS o esperar al USB.
+      log(
+        `[bitbang] reparto: armado ${formatDuration(statsBitbang.msArmado)}` +
+          ` / transferOut ${formatDuration(statsBitbang.msUsb)}`,
+      )
+    }
+    const cdone = await pollCdone(device)
+    log(`[bitbang] tras los 49 clocks: ${formatAdbusPins(await mpsse.readPins(device))}`)
 
-    const wake = iceprogSramSelect()
+    // --- 5. dejar la placa en un estado sano --------------------------------
     const idle = iceprogSramReleaseCs()
+    await mpsse.setGpio(device, idle.value, idle.direction)
+    const wake = iceprogSramSelect()
     await mpsse.setGpio(device, wake.value, wake.direction)
     await mpsse.sramSend(device, new Uint8Array([0xab]))
     await mpsse.setGpio(device, idle.value, idle.direction)
-    log('[mpsse] SRAM 0xAB — despierto la NOR sin pulsar CRESET (Reset/flash siguen andando)')
-    await sleep(1)
 
-    const t1 = now()
+    log('')
     if (cdone) {
-      log(
-        `[mpsse] SRAM CDONE=1 — corre desde CRAM (${payload.length} B, ${Math.round(t1 - t0)}ms). Reset o un corte de luz recarga la flash, no este diseño.`,
-      )
+      log('[bitbang] ★★★ CDONE=1 — LA FPGA SE CONFIGURÓ POR SLAVE. El bit-bang por ADBUS2 funciona.')
+      log('[bitbang] No hace falta ninguna modificación de hardware.')
     } else {
-      log(
-        `[mpsse] SRAM CDONE=0 — el slave no configuró (${payload.length} B, ${Math.round(t1 - t0)}ms). En Azukar FTDI CS, flash /CS y SPI_SS_B son el mismo net (ADBUS4). No hago Reset: eso recargaría la flash y parecería que SRAM anduvo.`,
-      )
+      log('[bitbang] CDONE=0 — ADBUS2 se maneja, pero la FPGA no tomó el bitstream.')
+      log('[bitbang] Revisar: polaridad del reloj, orden de bits, o el net de ADBUS2 no llega al SPI_SI.')
     }
-
-    return {
-      bytes: payload.length,
-      cdone,
-      totalMs: Math.round(t1 - t0),
-      pinsAfterSelect,
-    }
+    logElapsed(log, 'Bit-bang SRAM', t0, { bytes: payload.length })
+    return { adbus2Drives: true, cdone, bytes: payload.length }
   } catch (err) {
+    // Una NOR dormida hace que el boot master falle y la placa parezca muerta.
+    try {
+      await mpsse.flashReleasePowerDown(device)
+    } catch {
+      // el pipe ya no responde; lo resuelve un desenchufe
+    }
+    logElapsed(log, 'Bit-bang SRAM', t0, { failed: true })
     await closeMpsseSession()
     throw err
   }
 }
 
 export async function resetIce40FromFlash(log: ProgramLog): Promise<void> {
+  const t0 = now()
   const device = await openMpsse(log)
   try {
     await step('CRESET assert — mpsse.fpgaResetAssert', log, () =>
@@ -473,13 +549,16 @@ export async function resetIce40FromFlash(log: ProgramLog): Promise<void> {
     log(
       `[mpsse] reset CDONE=${cdone}${cdone ? ' (FPGA reléida desde la flash)' : ' — timeout'}`,
     )
+    logElapsed(log, 'Reset desde flash', t0)
   } catch (err) {
+    logElapsed(log, 'Reset desde flash', t0, { failed: true })
     await closeMpsseSession()
     throw err
   }
 }
 
 export async function eraseIce40Flash(log: ProgramLog): Promise<void> {
+  const t0 = now()
   const device = await openMpsse(log)
   try {
     await step('CRESET assert — mpsse.fpgaResetAssert', log, () =>
@@ -531,7 +610,9 @@ export async function eraseIce40Flash(log: ProgramLog): Promise<void> {
     log(
       `[mpsse] flash vacía CDONE=${cdone}${cdone ? '' : ' (esperado: no hay bitstream)'}`,
     )
+    logElapsed(log, 'Borrar flash', t0)
   } catch (err) {
+    logElapsed(log, 'Borrar flash', t0, { failed: true })
     await closeMpsseSession()
     throw err
   }
@@ -541,6 +622,7 @@ export async function readIce40Flash(
   log: ProgramLog,
   onProgress?: ProgramProgress,
 ): Promise<Uint8Array> {
+  const t0 = now()
   const device = await openMpsse(log)
   try {
     await step('CRESET assert — mpsse.fpgaResetAssert', log, () =>
@@ -567,14 +649,17 @@ export async function readIce40Flash(
     await sleep(250)
     const cdone = await mpsse.fpgaGetCdone(device)
     log(`[mpsse] dump listo CDONE=${cdone}`)
+    logElapsed(log, 'Leer flash', t0, { bytes: out.length })
     return out
   } catch (err) {
+    logElapsed(log, 'Leer flash', t0, { failed: true })
     await closeMpsseSession()
     throw err
   }
 }
 
 export async function readFtdiConfigEeprom(log: ProgramLog): Promise<Uint8Array> {
+  const t0 = now()
   const device = await openMpsse(log)
   try {
     log(
@@ -583,8 +668,10 @@ export async function readFtdiConfigEeprom(log: ProgramLog): Promise<Uint8Array>
     const raw = await mpsse.readEeprom(device, 256)
     log('[mpsse] EEPROM FTDI cruda (256 B, request 0x90) — no es la flash W25X40')
     log(formatHexDump(raw))
+    logElapsed(log, 'Leer EEPROM del FTDI', t0, { bytes: raw.length })
     return raw
   } catch (err) {
+    logElapsed(log, 'Leer EEPROM del FTDI', t0, { failed: true })
     await closeMpsseSession()
     throw err
   }

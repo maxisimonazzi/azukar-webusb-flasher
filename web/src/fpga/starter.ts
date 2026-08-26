@@ -1,7 +1,7 @@
 /** Lab starters keyed by board id. CLK / buttons / LEDs follow each PCF. */
 
-import { isCustomBoardId } from './boardTypes.ts'
-import type { FpgaFile } from './files.ts'
+import { isCustomBoardId, type BoardProfile } from './boardTypes.ts'
+import { PROJECT_PCF, type FpgaFile } from './files.ts'
 
 export const BLINKY_TOP = 'top_module'
 
@@ -407,6 +407,19 @@ export function starterForBoard(id: string): BoardStarter {
       return AZUKAR_STARTER
     default:
       return AZUKAR_STARTER
+  }
+}
+
+/**
+ * Proyecto inicial de una placa: los .v del laboratorio mas su `pins.pcf`.
+ * El PCF entra como un archivo mas, editable y exportable con el resto.
+ */
+export function projectStarter(board: BoardProfile): BoardStarter {
+  const base = starterForBoard(board.id)
+  if (!board.starterPcf.trim()) return base
+  return {
+    top: base.top,
+    files: [...base.files, { name: PROJECT_PCF, open: true, content: board.starterPcf }],
   }
 }
 

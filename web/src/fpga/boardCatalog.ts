@@ -36,6 +36,7 @@ function dirFromFolder(path: string): string | null {
   return match?.[1] ?? null
 }
 
+/** Texto del PCF de `boards/<id>/`. Es la plantilla que se copia al proyecto. */
 function pcfForFolder(folder: string, name: string): string {
   const needle = `/boards/${folder}/${name}`
   for (const [path, text] of Object.entries(pcfModules)) {
@@ -68,7 +69,7 @@ function parseListed(folder: string, json: BoardJson): BoardProfile | null {
     fpga,
     programmer,
     help: json.help,
-    pcfText: pcfForFolder(folder, fpga.pcf),
+    starterPcf: pcfForFolder(folder, fpga.pcf),
   }
 }
 
@@ -134,6 +135,6 @@ export function resolveBoard(id: string): BoardProfile {
       channel: 'A',
       adbus: { ...ICEPROG_ADBUS },
     },
-    pcfText: '',
+    starterPcf: '',
   }
 }

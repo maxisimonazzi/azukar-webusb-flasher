@@ -102,6 +102,44 @@ export function iceprogSramReleaseCs(adbus: AdbusBits = getActiveAdbus()): FtdiG
   }
 }
 
+/**
+ * ADBUS2 = TDO/DI del FT2232H. Lo fija el motor MPSSE, no el perfil de placa.
+ *
+ * En el cableado estandar (FTDI + flash + FPGA sobre el mismo bus) este pin
+ * comparte net con el DO de la flash y con el SPI_SI de la FPGA — o sea, es el
+ * unico pin del FTDI que puede alcanzar la entrada de datos de configuracion.
+ * El motor de datos del MPSSE solo transmite por ADBUS1, asi que para usarlo
+ * hay que manejarlo como GPIO y bit-banguear.
+ */
+export const ADBUS_DATA_IN_BIT = 2
+export const PIN_DATA_IN = adbusMask(ADBUS_DATA_IN_BIT)
+
+/**
+ * Direccion para el bit-bang de configuracion slave: manejamos SCK, el dato
+ * (ADBUS2), CS y CRESET. **MOSI (ADBUS1) queda como entrada** a proposito: en
+ * slave el SPI_SO de la FPGA es una salida sobre ese mismo net y no hay que
+ * pelearlo.
+ */
+export function iceprogBitbangDirection(adbus: AdbusBits = getActiveAdbus()): number {
+  const map = bits(adbus)
+  return (
+    adbusMask(map.sck) | PIN_DATA_IN | adbusMask(map.cs) | adbusMask(map.creset)
+  )
+}
+
+/** Valor de ADBUS para un bit del shift: CS abajo, CRESET arriba, dato y reloj. */
+export function iceprogBitbangValue(
+  dataHigh: boolean,
+  sckHigh: boolean,
+  adbus: AdbusBits = getActiveAdbus(),
+): number {
+  const map = bits(adbus)
+  let value = adbusMask(map.creset)
+  if (dataHigh) value |= PIN_DATA_IN
+  if (sckHigh) value |= adbusMask(map.sck)
+  return value
+}
+
 /** Decode ADBUS after a SETB/READB so the lab log shows CS / CRESET / CDONE. */
 export function formatAdbusPins(
   pins: number,

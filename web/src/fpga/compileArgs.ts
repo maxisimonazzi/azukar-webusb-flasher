@@ -1,6 +1,12 @@
-/** Same limits and argv as toolchain/compile_server.py — used by the browser worker. */
+/** Limits and argv for the YoWASP browser worker (Yosys → nextpnr-ice40 → icepack). */
 
-import { FPGA_IDENT_RE, FPGA_NAME_RE, isAllowedFilename } from './files.ts'
+import {
+  FPGA_IDENT_RE,
+  FPGA_NAME_RE,
+  isAllowedFilename,
+  isPcfFilename,
+  pickPcfFile,
+} from './files.ts'
 
 export const MAX_FILES = 100
 export const MAX_CHARS = 80_000
@@ -11,10 +17,10 @@ export const TOKEN_RE = /^[A-Za-z0-9_.:-]+$/
 
 export type CompileFile = { name: string; content: string }
 
+/** La placa aporta el part de nextpnr. El PCF es un archivo del proyecto. */
 export type CompileBoard = {
   device: string
   package: string
-  pcf: string
 }
 
 export type CompileJob = {
@@ -26,7 +32,9 @@ export type CompileJob = {
 
 export type CompileTree = { [name: string]: CompileTree | string | Uint8Array }
 
-function fail(code: 'COMPILE_TOO_LARGE' | 'COMPILE_BAD_INPUT'): never {
+function fail(
+  code: 'COMPILE_TOO_LARGE' | 'COMPILE_BAD_INPUT' | 'COMPILE_NO_PCF' | 'COMPILE_MANY_PCF',
+): never {
   throw new Error(code)
 }
 
@@ -38,17 +46,23 @@ export function buildCompileJob(
   const topName = top.trim()
   if (!FPGA_IDENT_RE.test(topName)) fail('COMPILE_BAD_INPUT')
   if (!TOKEN_RE.test(board.device) || !TOKEN_RE.test(board.package)) fail('COMPILE_BAD_INPUT')
-  const pcf = board.pcf
-  if (!pcf.trim() || pcf.length > MAX_PCF_CHARS) fail('COMPILE_BAD_INPUT')
   if (!files.length || files.length > MAX_FILES) fail('COMPILE_TOO_LARGE')
 
+  const pick = pickPcfFile(files)
+  if (pick.kind === 'many') fail('COMPILE_MANY_PCF')
+  if (pick.kind === 'none' || !pick.file.content.trim()) fail('COMPILE_NO_PCF')
+  const pcfFile = pick.file
+
   const names: string[] = []
-  const tree: Record<string, string> = { 'pins.pcf': pcf }
+  const tree: Record<string, string> = {}
   let total = 0
   const seen = new Set<string>()
   for (const file of files) {
-    if (!FPGA_NAME_RE.test(file.name) && !isAllowedFilename(file.name)) fail('COMPILE_BAD_INPUT')
-    if (file.content.length > MAX_FILE_CHARS) fail('COMPILE_TOO_LARGE')
+    const pcf = isPcfFilename(file.name)
+    if (!FPGA_NAME_RE.test(file.name) && !pcf && !isAllowedFilename(file.name)) {
+      fail('COMPILE_BAD_INPUT')
+    }
+    if (file.content.length > (pcf ? MAX_PCF_CHARS : MAX_FILE_CHARS)) fail('COMPILE_TOO_LARGE')
     if (seen.has(file.name)) fail('COMPILE_BAD_INPUT')
     seen.add(file.name)
     total += file.content.length
@@ -71,7 +85,7 @@ export function buildCompileJob(
       '--asc',
       'out.asc',
       '--pcf',
-      'pins.pcf',
+      pcfFile.name,
       '--report',
       'out.pnr',
     ],

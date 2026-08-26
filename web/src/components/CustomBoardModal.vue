@@ -8,14 +8,11 @@ import {
   NEXTPRN_DEVICES,
   NEXTPRN_PACKAGES,
   adbusHasDuplicates,
-  pcfRowsToText,
-  pcfTextToRows,
   type AdbusBits,
   type AdbusSignal,
   type CustomBoardDraft,
-  type PcfDir,
-  type PcfRow,
 } from '@/fpga/boardTypes'
+import { PROJECT_PCF } from '@/fpga/files'
 
 const props = defineProps<{
   open: boolean
@@ -29,21 +26,17 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-type PcfTab = 'file' | 'form' | 'text'
-
 const title = ref('')
 const device = ref('hx8k')
 const packageName = ref('tq144:4k')
 const adbus = ref<AdbusBits>({ sck: 0, mosi: 1, cs: 4, cdone: 6, creset: 7 })
-const pcf = ref('')
-const rows = ref<PcfRow[]>([])
-const tab = ref<PcfTab>('text')
-const pcfFile = ref<HTMLInputElement | null>(null)
+const vid = ref('')
+const pid = ref('')
 const bumping = ref(false)
 const dup = computed(() => adbusHasDuplicates(adbus.value))
 
-const dirs: PcfDir[] = ['input', 'output', 'inout']
 const adbusPins = [0, 1, 2, 3, 4, 5, 6, 7]
+const pcfName = PROJECT_PCF
 
 function signalLabel(key: AdbusSignal): string {
   switch (key) {
@@ -64,32 +57,31 @@ function signalLabel(key: AdbusSignal): string {
   }
 }
 
-function dirLabel(dir: PcfDir): string {
-  switch (dir) {
-    case 'input':
-      return t('board.dirIn')
-    case 'output':
-      return t('board.dirOut')
-    case 'inout':
-      return t('board.dirInout')
-    default: {
-      const _exhaustive: never = dir
-      return _exhaustive
-    }
-  }
+/** Acepta `0x0403` o `1027`. Fuera de 16 bits no es un ID USB. */
+function parseUsbId(raw: string): number | null {
+  const text = raw.trim()
+  let n: number
+  if (/^0[xX][0-9a-fA-F]{1,4}$/.test(text)) n = Number.parseInt(text.slice(2), 16)
+  else if (/^[0-9]{1,5}$/.test(text)) n = Number.parseInt(text, 10)
+  else return null
+  return n >= 0 && n <= 0xffff ? n : null
 }
+
+function usbIdText(value: number): string {
+  return `0x${value.toString(16).padStart(4, '0')}`
+}
+
+const vidValue = computed(() => parseUsbId(vid.value))
+const pidValue = computed(() => parseUsbId(pid.value))
+const badUsb = computed(() => vidValue.value == null || pidValue.value == null)
 
 function hydrate(draft: CustomBoardDraft) {
   title.value = draft.title
   device.value = draft.device
   packageName.value = draft.package
   adbus.value = { ...draft.adbus }
-  pcf.value = draft.pcf
-  rows.value = pcfTextToRows(draft.pcf)
-  if (!rows.value.length) {
-    rows.value = [{ name: '', pin: '', dir: 'inout' }]
-  }
-  tab.value = 'text'
+  vid.value = usbIdText(draft.vid)
+  pid.value = usbIdText(draft.pid)
   bumping.value = false
 }
 
@@ -100,44 +92,6 @@ watch(
   },
 )
 
-function setTab(next: PcfTab) {
-  switch (next) {
-    case 'form':
-      rows.value = pcfTextToRows(pcf.value)
-      if (!rows.value.length) rows.value = [{ name: '', pin: '', dir: 'inout' }]
-      break
-    case 'text':
-    case 'file':
-      if (tab.value === 'form') pcf.value = pcfRowsToText(rows.value)
-      break
-    default: {
-      const _exhaustive: never = next
-      return _exhaustive
-    }
-  }
-  tab.value = next
-}
-
-function addRow() {
-  rows.value = [...rows.value, { name: '', pin: '', dir: 'inout' }]
-}
-
-function removeRow(index: number) {
-  rows.value = rows.value.filter((_, i) => i !== index)
-}
-
-function onPcfFile(ev: Event) {
-  const input = ev.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file) return
-  void file.text().then((text) => {
-    pcf.value = text
-    rows.value = pcfTextToRows(text)
-    tab.value = 'text'
-  })
-}
-
 function onAdbus(key: AdbusSignal, ev: Event) {
   const el = ev.target
   if (!(el instanceof HTMLSelectElement)) return
@@ -145,17 +99,16 @@ function onAdbus(key: AdbusSignal, ev: Event) {
 }
 
 function onSave() {
-  if (dup.value) return
-  if (tab.value === 'form') pcf.value = pcfRowsToText(rows.value)
-  if (!pcf.value.trim()) return
+  const nextVid = vidValue.value
+  const nextPid = pidValue.value
+  if (dup.value || nextVid == null || nextPid == null) return
   emit('save', {
     title: title.value,
     device: device.value,
     package: packageName.value,
-    vid: props.initial.vid,
-    pid: props.initial.pid,
+    vid: nextVid,
+    pid: nextPid,
     adbus: { ...adbus.value },
-    pcf: pcf.value,
   })
 }
 
@@ -170,13 +123,7 @@ function onNudgeEnd() {
   bumping.value = false
 }
 
-const canSave = computed(() => {
-  if (dup.value) return false
-  if (tab.value === 'form') {
-    return rows.value.some((row) => row.name.trim() && row.pin.trim())
-  }
-  return pcf.value.trim().length > 0
-})
+const canSave = computed(() => !dup.value && !badUsb.value)
 </script>
 
 <template>
@@ -208,7 +155,9 @@ const canSave = computed(() => {
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto px-5 pt-2 pb-4">
       <p class="text-sm leading-relaxed text-muted">{{ t('board.customIntro') }}</p>
-      <p class="mt-2 text-sm leading-relaxed text-muted">{{ t('board.customRemind') }}</p>
+      <p class="mt-2 rounded-md border border-border bg-surface-2/70 px-3 py-2 text-sm leading-relaxed text-muted">
+        {{ t('board.pcfInProject', { name: pcfName }) }}
+      </p>
       <p class="mt-2 rounded-md border border-border bg-surface-2/70 px-3 py-2 text-sm leading-relaxed text-muted">
         {{ t('board.storageNotice') }}
       </p>
@@ -221,7 +170,11 @@ const canSave = computed(() => {
         >
       </label>
 
-      <div class="mt-3 grid gap-3 sm:grid-cols-2">
+      <p class="mt-4 text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase">
+        {{ t('board.fpgaPart') }}
+      </p>
+      <p class="mt-1 text-xs text-muted">{{ t('board.fpgaPartHint') }}</p>
+      <div class="mt-2 grid gap-3 sm:grid-cols-2">
         <label class="text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase">
           {{ t('board.device') }}
           <select
@@ -241,6 +194,30 @@ const canSave = computed(() => {
           </select>
         </label>
       </div>
+
+      <p class="mt-4 text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase">
+        {{ t('board.usb') }}
+      </p>
+      <p class="mt-1 text-xs text-muted">{{ t('board.usbHint') }}</p>
+      <div class="mt-2 grid gap-3 sm:grid-cols-2">
+        <label class="text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase">
+          {{ t('board.vid') }}
+          <input
+            v-model="vid"
+            spellcheck="false"
+            class="mt-1 w-full rounded-md border border-border bg-surface-2 px-2 py-1 font-mono text-sm font-normal tracking-normal text-fg normal-case"
+          >
+        </label>
+        <label class="text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase">
+          {{ t('board.pid') }}
+          <input
+            v-model="pid"
+            spellcheck="false"
+            class="mt-1 w-full rounded-md border border-border bg-surface-2 px-2 py-1 font-mono text-sm font-normal tracking-normal text-fg normal-case"
+          >
+        </label>
+      </div>
+      <p v-if="badUsb" class="mt-2 text-xs text-error">{{ t('board.usbBad') }}</p>
 
       <p class="mt-4 text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase">
         {{ t('board.adbus') }}
@@ -263,86 +240,6 @@ const canSave = computed(() => {
         </label>
       </div>
       <p v-if="dup" class="mt-2 text-xs text-error">{{ t('board.adbusDup') }}</p>
-
-      <p class="mt-4 text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase">
-        {{ t('board.pcf') }}
-      </p>
-      <ul class="mt-2 list-disc space-y-1 pl-5 text-xs leading-relaxed text-muted">
-        <li>{{ t('board.pcfFileHint') }}</li>
-        <li>{{ t('board.pcfFormHint') }}</li>
-        <li>{{ t('board.pcfTextHint') }}</li>
-      </ul>
-      <div class="mt-2 inline-flex rounded-lg border border-border bg-surface-2/60 p-0.5">
-        <button
-          type="button"
-          class="rounded-md px-2 py-1 text-xs font-semibold"
-          :class="tab === 'file' ? 'bg-primary/15 text-primary' : 'text-muted hover:text-fg'"
-          @click="setTab('file')"
-        >
-          {{ t('board.pcfFile') }}
-        </button>
-        <button
-          type="button"
-          class="rounded-md px-2 py-1 text-xs font-semibold"
-          :class="tab === 'form' ? 'bg-primary/15 text-primary' : 'text-muted hover:text-fg'"
-          @click="setTab('form')"
-        >
-          {{ t('board.pcfForm') }}
-        </button>
-        <button
-          type="button"
-          class="rounded-md px-2 py-1 text-xs font-semibold"
-          :class="tab === 'text' ? 'bg-primary/15 text-primary' : 'text-muted hover:text-fg'"
-          @click="setTab('text')"
-        >
-          {{ t('board.pcfText') }}
-        </button>
-      </div>
-
-      <div v-if="tab === 'file'" class="mt-3">
-        <input
-          ref="pcfFile"
-          type="file"
-          accept=".pcf,text/plain"
-          class="text-sm"
-          @change="onPcfFile"
-        >
-      </div>
-
-      <div v-else-if="tab === 'form'" class="mt-3 space-y-2">
-        <div
-          v-for="(row, i) in rows"
-          :key="i"
-          class="grid grid-cols-[1fr_5rem_8rem_2rem] items-center gap-1"
-        >
-          <input
-            v-model="row.name"
-            class="rounded-md border border-border bg-surface-2 px-2 py-1 font-mono text-xs"
-            :placeholder="t('board.signal')"
-          >
-          <input
-            v-model="row.pin"
-            class="rounded-md border border-border bg-surface-2 px-2 py-1 font-mono text-xs"
-            :placeholder="t('board.pin')"
-          >
-          <select
-            v-model="row.dir"
-            class="rounded-md border border-border bg-surface-2 px-1 py-1 text-xs"
-          >
-            <option v-for="d in dirs" :key="d" :value="d">{{ dirLabel(d) }}</option>
-          </select>
-          <button type="button" class="text-muted hover:text-error" @click="removeRow(i)">×</button>
-        </div>
-        <AppButton variant="outline" size="sm" @click="addRow">{{ t('board.addPin') }}</AppButton>
-      </div>
-
-      <textarea
-        v-else
-        v-model="pcf"
-        class="mt-3 min-h-32 w-full resize-y rounded-md border border-border bg-surface-2 p-2 font-mono text-[0.7rem] text-fg"
-        rows="12"
-        spellcheck="false"
-      />
       </div>
 
       <div class="flex shrink-0 flex-wrap gap-2 border-t border-border px-5 py-3">

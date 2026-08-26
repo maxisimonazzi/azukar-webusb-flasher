@@ -120,10 +120,6 @@ function blurb(id: string): string {
           rel="noopener noreferrer"
         >{{ board.help.siteUrl }}</a>
       </div>
-      <p class="mt-4 text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase">
-        {{ t('board.pcf') }}
-      </p>
-      <pre class="mt-1 max-h-56 overflow-auto rounded-md border border-border bg-surface-2 p-3 font-mono text-[0.7rem] leading-relaxed text-fg">{{ board.pcfText || t('board.pcfEmpty') }}</pre>
     </div>
   </div>
 </template>

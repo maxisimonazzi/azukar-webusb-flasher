@@ -10,6 +10,7 @@ import {
   isFpgaFilename,
   nextFpgaFilename,
   openFpgaTab,
+  pickPcfFile,
   projectZipDownloadName,
   uniquifyFpgaName,
   visibleFpgaTabs,
@@ -128,6 +129,20 @@ test('renameFpgaFile changes the name when free and valid', () => {
   assert.equal(renameFpgaFile(files, 'mod.v', 'counter.v')[0]?.name, 'counter.v')
   assert.equal(renameFpgaFile(files, 'mod.v', 'data.txt')[0]?.name, 'data.txt')
   assert.equal(renameFpgaFile(files, 'mod.v', 'pins.pcf')[0]?.name, 'pins.pcf')
+})
+
+test('pickPcfFile needs exactly one .pcf in the project', () => {
+  const top = { name: 'top.v' }
+  assert.deepEqual(pickPcfFile([top]), { kind: 'none' })
+
+  const one = pickPcfFile([top, { name: 'azukar.pcf' }])
+  assert.equal(one.kind, 'ok')
+  assert.equal(one.kind === 'ok' ? one.file.name : '', 'azukar.pcf')
+
+  assert.deepEqual(pickPcfFile([top, { name: 'a.pcf' }, { name: 'pins.pcf' }]), {
+    kind: 'many',
+    names: ['a.pcf', 'pins.pcf'],
+  })
 })
 
 test('binDownloadName follows the top module', () => {

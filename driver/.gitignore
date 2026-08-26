@@ -1,0 +1,6 @@
+# En esta carpeta solo se versiona el ejecutable que descarga el usuario final.
+# Todo lo demas (fuentes del paquete, scripts de firma, la clave privada) queda
+# fuera del repositorio: se regenera con armar_exe.ps1 / firmar_driver.ps1.
+*
+!.gitignore
+!driver_azukar.exe

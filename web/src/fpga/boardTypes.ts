@@ -1,4 +1,4 @@
-/** Shared board types and PCF helpers. No Vite glob — Node tests can import this. */
+/** Shared board types. No Vite glob — Node tests can import this. */
 
 import { readLocal, removeLocal, writeLocal } from '../lib/storage.ts'
 
@@ -8,6 +8,7 @@ export const BOARD_ID_KEY = 'boardId'
 export const CUSTOM_BOARD_KEY = 'customBoard'
 export const CUSTOM_BOARDS_KEY = 'customBoards'
 
+/** Semilla de `pins.pcf` para una placa no listada. El usuario lo edita en el proyecto. */
 export const EXAMPLE_CUSTOM_PCF = `# Ejemplo de como mapear los pines de tu placa con su variable.
 # Modifica con los valores adecuados para tu placa.
 
@@ -84,14 +85,6 @@ export const NEXTPRN_PACKAGES = [
   'uwg30',
 ] as const
 
-export type PcfDir = 'input' | 'output' | 'inout'
-
-export type PcfRow = {
-  name: string
-  pin: string
-  dir: PcfDir
-}
-
 export type BoardHelp = {
   fpgaLabel?: string
   pinoutUrl?: string
@@ -121,7 +114,8 @@ export type BoardProfile = {
     adbus: AdbusBits
   }
   help?: BoardHelp
-  pcfText: string
+  /** Plantilla del PCF. Se copia al proyecto como `pins.pcf`; no se compila desde acá. */
+  starterPcf: string
 }
 
 export type CustomBoardDraft = {
@@ -131,11 +125,9 @@ export type CustomBoardDraft = {
   vid: number
   pid: number
   adbus: AdbusBits
-  pcf: string
+  /** Plantilla opcional (las placas viejas guardaron su PCF acá). El PCF vive en el proyecto. */
+  starterPcf?: string
 }
-
-const PCF_IO_RE =
-  /^\s*set_io(?:\s+(?:-nowarn|--warn-no-port))?\s+(\S+)\s+(\S+)/i
 
 export const TOKEN_RE = /^[A-Za-z0-9_.:-]+$/
 
@@ -153,64 +145,11 @@ export function adbusHasDuplicates(adbus: AdbusBits): boolean {
   return new Set(pins).size !== pins.length
 }
 
-function dirComment(dir: PcfDir): string {
-  switch (dir) {
-    case 'input':
-      return 'input'
-    case 'output':
-      return 'output'
-    case 'inout':
-      return 'input/output'
-    default: {
-      const _exhaustive: never = dir
-      return _exhaustive
-    }
-  }
-}
-
-function commentToDir(comment: string): PcfDir {
-  const c = comment.toLowerCase()
-  if (c.includes('input/output') || c.includes('inout')) return 'inout'
-  if (c.includes('output')) return 'output'
-  if (c.includes('input')) return 'input'
-  return 'inout'
-}
-
-export function pcfRowsToText(rows: PcfRow[]): string {
-  const lines = [
-    '# Custom board constraints (.pcf)',
-    '# Clock: define CLK (or CLK12). UART: define TX and RX if you use the serial console.',
-    '',
-  ]
-  for (const row of rows) {
-    const name = row.name.trim()
-    const pin = row.pin.trim()
-    if (!name || !pin) continue
-    lines.push(`set_io -nowarn ${name} ${pin}  # ${dirComment(row.dir)}`)
-  }
-  return `${lines.join('\n')}\n`
-}
-
-export function pcfTextToRows(text: string): PcfRow[] {
-  const rows: PcfRow[] = []
-  for (const line of text.split(/\r?\n/)) {
-    const match = line.match(PCF_IO_RE)
-    if (!match) continue
-    const comment = line.includes('#') ? line.slice(line.indexOf('#') + 1) : ''
-    rows.push({
-      name: match[1] ?? '',
-      pin: match[2] ?? '',
-      dir: commentToDir(comment),
-    })
-  }
-  return rows
-}
-
 export function isCustomBoardId(id: string): boolean {
   return id === CUSTOM_BOARD_ID || id.startsWith('custom-')
 }
 
-export function emptyCustomDraft(examplePcf = EXAMPLE_CUSTOM_PCF): CustomBoardDraft {
+export function emptyCustomDraft(): CustomBoardDraft {
   return {
     title: '',
     device: 'hx8k',
@@ -218,7 +157,6 @@ export function emptyCustomDraft(examplePcf = EXAMPLE_CUSTOM_PCF): CustomBoardDr
     vid: FTDI_VID_DEFAULT,
     pid: FTDI_PID_DEFAULT,
     adbus: { ...ICEPROG_ADBUS },
-    pcf: examplePcf,
   }
 }
 
@@ -250,7 +188,7 @@ export function customDraftToProfile(
       clock: 'Define CLK (or CLK12) in the PCF',
       uart: 'Define TX and RX in the PCF to use the UART console',
     },
-    pcfText: draft.pcf,
+    starterPcf: draft.starterPcf?.trim() ? draft.starterPcf : EXAMPLE_CUSTOM_PCF,
   }
 }
 
@@ -264,10 +202,13 @@ function writeStore(key: string, value: string): void {
 
 function parseCustomDraft(raw: unknown): CustomBoardDraft | null {
   if (!raw || typeof raw !== 'object') return null
-  const data = raw as Partial<CustomBoardDraft>
-  if (typeof data.pcf !== 'string' || !isAdbusBits(data.adbus)) return null
+  const data = raw as Partial<CustomBoardDraft> & { pcf?: unknown }
+  if (!isAdbusBits(data.adbus)) return null
   if (typeof data.device !== 'string' || typeof data.package !== 'string') return null
   if (!TOKEN_RE.test(data.device) || !TOKEN_RE.test(data.package)) return null
+  // `pcf` es el campo viejo: la placa guardaba su PCF. Ahora es solo una plantilla.
+  const legacy = typeof data.pcf === 'string' ? data.pcf : undefined
+  const starterPcf = typeof data.starterPcf === 'string' ? data.starterPcf : legacy
   return {
     title: typeof data.title === 'string' ? data.title : 'Custom',
     device: data.device,
@@ -275,7 +216,7 @@ function parseCustomDraft(raw: unknown): CustomBoardDraft | null {
     vid: typeof data.vid === 'number' ? data.vid : FTDI_VID_DEFAULT,
     pid: typeof data.pid === 'number' ? data.pid : FTDI_PID_DEFAULT,
     adbus: data.adbus,
-    pcf: data.pcf,
+    ...(starterPcf ? { starterPcf } : {}),
   }
 }
 

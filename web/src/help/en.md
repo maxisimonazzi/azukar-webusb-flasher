@@ -2,11 +2,13 @@
 
 This app runs in the browser. You edit Verilog, compile an iCE40 `.bin`, and — in Chrome or Edge — flash the board over USB. There is no account and no user API.
 
-**Select the board before you compile** (top right). That picks the PCF (FPGA pins) and the FTDI programmer map. A bitstream built for another board will not match the LEDs, buttons, or UART on the one you plugged in.
+**Select the board before you compile** (top right). That picks the chip (nextpnr device/package) and how the programmer talks to the FTDI. FPGA pins do not come from there: they come from `pins.pcf`, one more project file you can edit.
+
+Picking a board loads its example `pins.pcf` as a file. Rename the signals, add pins, or drop in your own: it is your file.
 
 ## Panels
 
-- **File tree (left).** The project `.v` files. The **top module** is what Yosys synthesizes.
+- **File tree (left).** The project `.v` files and its `pins.pcf`. The **top module** is what Yosys synthesizes.
 - **Editor (center).** Verilog for the active tab. You can import or export a project zip.
 - **Programmer (top right).** Synthesis and WebUSB log (FTDI channel A): connect, compile, flash/SRAM, erase, read, reset.
 - **UART (bottom right).** WebSerial, channel B. Text the FPGA sends (for example `Hola UART`).
@@ -16,7 +18,9 @@ This app runs in the browser. You edit Verilog, compile an iCE40 `.bin`, and —
 - **+** creates a new `.v` (tree or tab bar).
 - Click a file in the tree to open it. **Double-click** (tree or tab) to rename.
 - **×** on a tab closes it; the file stays in the tree. **×** in the tree deletes the file (at least one must remain).
-- **Import / export project** moves a zip of `.v` files. Nothing is stored on a server; it lives in this window.
+- **Import / export project** moves a zip with the `.v`, the `.pcf` and any `.txt`. Nothing is stored on a server.
+- The project is kept in **this** browser (`localStorage`): reload or close the tab and it comes back as you left it. It is not on another computer — export the zip for that.
+- **Reset project** (the circular arrow icon) drops what is stored and brings back the active board's lab. It asks first.
 
 ## Consoles
 
@@ -27,7 +31,7 @@ This app runs in the browser. You edit Verilog, compile an iCE40 `.bin`, and —
 
 - **Connect programmer.** Chrome shows the USB picker. Choose FTDI channel A (programmer), not the UART COM port.
 - **Disconnect.** Releases WebUSB.
-- **Compile.** Synthesizes the Verilog in this window for **the selected board**. The `.bin` stays in memory; YoWASP mode does not upload HDL to a server.
+- **Compile.** Synthesizes the Verilog in this window for **the selected board**. The `.bin` stays in memory; no HDL is uploaded to a server.
 - **Program flash.** Writes the compiled `.bin`, or one you upload, to SPI flash. Survives reset and unplug.
 - **Program SRAM.** Loads the bitstream into the FPGA without touching flash. Lost on reset or unplug.
 - **Erase flash.** Clears SPI.
@@ -59,10 +63,11 @@ Firefox has no WebUSB: you can edit and compile, but not flash.
 
 ## What compile does
 
-Yosys → nextpnr-ice40 → icepack, using the active board’s PCF. The result is a `.bin` bitstream.
+Yosys → nextpnr-ice40 → icepack, using the project’s `pins.pcf` and the active board’s device/package. The result is a `.bin` bitstream.
 
-- **YoWASP** runs in this browser (first time downloads the WASM files).
-- **server** runs in the toolchain container.
+The project must hold **exactly one** `.pcf`. With none, the compile stops and shows the active board's PCF so you can add it in one click. With more than one it also stops: keep a single one.
+
+It all runs in this browser with **YoWASP** (WebAssembly): the first time it downloads the WASM files, then they stay cached.
 
 On success: **Binary ready** and a download link in the programmer console. That same `.bin` is what **Program flash / SRAM** uses.
 
@@ -72,10 +77,10 @@ Under **Program flash** or **Program SRAM**, choose the upload-file option. It m
 
 ## Custom board
 
-**Unlisted board…** in the selector. You set a name, nextpnr device/package, the **FTDI ADBUS** map (programmer), and the **PCF** (FPGA pins). Those are two different maps.
+**Unlisted board…** in the selector. You set a name, nextpnr device/package, USB VID/PID, and the **FTDI ADBUS** map (programmer). FPGA pins do not go here: they go in the project’s `pins.pcf`. Those are two different maps.
 
 It is stored in `localStorage` on **this** browser. Another computer will not have it. The **?** on each board opens pinout and ADBUS help.
 
 ## Starter lab
 
-When you switch boards, if you have not edited the `.v` files, the lab for that board loads (counter, buttons, UART). If you already changed the code, it is kept.
+When you switch boards, if you have not edited the project, the lab for that board loads (counter, buttons, UART) along with its `pins.pcf`. If you already changed something, your work is kept, `pins.pcf` included.

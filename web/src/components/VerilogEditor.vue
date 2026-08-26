@@ -7,7 +7,7 @@ import { tags } from '@lezer/highlight'
 import { basicSetup } from 'codemirror'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { verilogLanguage } from '@/lib/verilogEditor'
+import { pcfLanguage, verilogLanguage, type EditorLanguage } from '@/lib/verilogEditor'
 import { editorFontSizeRef } from '@/prefs/editorFont'
 import { themeRef } from '@/prefs/theme'
 
@@ -19,9 +19,12 @@ const props = withDefaults(
     heightClass?: string
     /** Override the global editor font (page-local size). */
     fontSize?: number
+    /** Grammar for the open file. `.pcf` no es Verilog. */
+    language?: EditorLanguage
   }>(),
   {
     heightClass: 'h-72 min-h-72',
+    language: 'verilog',
   },
 )
 
@@ -100,6 +103,21 @@ function fontExtension(px: number) {
   })
 }
 
+function languageExtensions() {
+  switch (props.language) {
+    case 'pcf':
+      return [pcfLanguage]
+    case 'plain':
+      return []
+    case 'verilog':
+      return [verilogLanguage]
+    default: {
+      const _exhaustive: never = props.language
+      return _exhaustive
+    }
+  }
+}
+
 function mountEditor(doc: string) {
   if (!host.value) return
   view?.destroy()
@@ -108,7 +126,7 @@ function mountEditor(doc: string) {
       doc,
       extensions: [
         basicSetup,
-        verilogLanguage,
+        ...languageExtensions(),
         keymap.of([...defaultKeymap, indentWithTab]),
         EditorView.editable.of(!props.readonly),
         EditorView.updateListener.of((update) => {

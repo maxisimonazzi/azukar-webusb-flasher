@@ -14,12 +14,6 @@ export type ProgramStats = {
   sectors: number
 }
 
-export type SramProgramStats = {
-  bytes: number
-  cdone: 0 | 1
-  totalMs: number
-  pinsAfterSelect: string
-}
 
 /** FT2232H MPSSE + SPI flash. See `mpsse.ts`. */
 export interface Ice40Mpsse {
@@ -45,6 +39,11 @@ export interface Ice40Mpsse {
   flashBlockErase64k(device: USBDevice, addr: number): Promise<void>
   flashChipErase(device: USBDevice): Promise<void>
   flashProgPage(device: USBDevice, addr: number, data: Uint8Array): Promise<void>
+  flashWriteEnableAndProgPage(
+    device: USBDevice,
+    addr: number,
+    data: Uint8Array,
+  ): Promise<void>
   sramReset(device: USBDevice): Promise<void>
   sramSelect(device: USBDevice): Promise<void>
   sramSend(device: USBDevice, data: Uint8Array): Promise<void>

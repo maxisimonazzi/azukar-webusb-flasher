@@ -2,11 +2,13 @@
 
 Esta app corre en el navegador. Editás Verilog, compilás a un `.bin` iCE40 y, en Chrome o Edge, grabás la placa por USB. No hay cuenta ni servidor de usuarios.
 
-**Antes de compilar, elegí la placa** arriba a la derecha. Eso elige el PCF (pines del FPGA) y el mapa del programador FTDI. Si compilás con otra placa, el `.bin` no va a coincidir con los LEDs, botones ni UART de la que tenés enchufada.
+**Antes de compilar, elegí la placa** arriba a la derecha. Eso define el chip (device/package de nextpnr) y cómo se conecta el programador al FTDI. Los pines del FPGA no salen de ahí: salen de `pins.pcf`, un archivo más del proyecto que podés editar.
+
+Al elegir una placa, su `pins.pcf` de ejemplo se carga como archivo. Cambiale los nombres de las señales, agregá pines o poné el tuyo: es tu archivo.
 
 ## Paneles
 
-- **Árbol de archivos (izquierda).** Lista los `.v` del proyecto. El **módulo top** es el que Yosys sintetiza.
+- **Árbol de archivos (izquierda).** Lista los `.v` y el `pins.pcf` del proyecto. El **módulo top** es el que Yosys sintetiza.
 - **Editor (centro).** El Verilog de la pestaña activa. Podés importar o exportar un zip del proyecto.
 - **Programador (arriba a la derecha).** Consola de síntesis y de WebUSB (canal A del FTDI): conectar, compilar, grabar flash/SRAM, borrar, leer, reset.
 - **UART (abajo a la derecha).** WebSerial, canal B. Texto que manda la FPGA (por ejemplo `Hola UART`).
@@ -16,7 +18,9 @@ Esta app corre en el navegador. Editás Verilog, compilás a un `.bin` iCE40 y, 
 - **+** crea un `.v` nuevo (en el árbol o junto a las pestañas).
 - Un click en el árbol abre el archivo. **Doble click** (árbol o pestaña) cambia el nombre.
 - **×** en la pestaña la cierra pero el archivo sigue en el árbol. **×** en el árbol borra el archivo (tiene que quedar al menos uno).
-- **Importar / exportar proyecto** mueve un zip de `.v`. No se guarda en el servidor: vive en esta ventana.
+- **Importar / exportar proyecto** mueve un zip con los `.v`, el `.pcf` y los `.txt`. No se guarda en el servidor.
+- El proyecto queda guardado en **este** navegador (`localStorage`): si recargás o cerrás la pestaña, vuelve como lo dejaste. En otra PC no está: para eso exportá el zip.
+- **Reiniciar proyecto** (el ícono de la flecha circular) borra lo guardado y vuelve al laboratorio de la placa activa. Avisa antes.
 
 ## Consolas
 
@@ -27,7 +31,7 @@ Esta app corre en el navegador. Editás Verilog, compilás a un `.bin` iCE40 y, 
 
 - **Conectar programador.** Chrome muestra el picker USB. Elegí el FTDI, canal A (programador), no el COM del UART.
 - **Desconectar.** Suelta el WebUSB.
-- **Compilar.** Sintetiza el Verilog de esta ventana para **la placa seleccionada**. El `.bin` queda en memoria; no se sube a ningún servidor si estás en modo YoWASP.
+- **Compilar.** Sintetiza el Verilog de esta ventana para **la placa seleccionada**. El `.bin` queda en memoria; no se sube a ningún servidor.
 - **Grabar en flash.** Escribe el `.bin` compilado, o uno que subas, en la SPI. Sobrevive un reset o un corte de USB.
 - **Grabar en SRAM.** Carga el bitstream en la FPGA sin tocar la flash. Se pierde al resetear o al desconectar.
 - **Borrar flash.** Deja la SPI vacía.
@@ -59,10 +63,11 @@ Firefox no tiene WebUSB: podés editar y compilar, pero no grabar.
 
 ## Qué pasa al compilar
 
-Yosys → nextpnr-ice40 → icepack, con el PCF de la placa activa. El resultado es un bitstream `.bin`.
+Yosys → nextpnr-ice40 → icepack, con el `pins.pcf` del proyecto y el device/package de la placa activa. El resultado es un bitstream `.bin`.
 
-- En modo **YoWASP** corre en este navegador (la primera vez baja los WASM).
-- En modo **server** corre en el contenedor toolchain.
+Tiene que haber **un solo** `.pcf` en el proyecto. Si no hay ninguno, la compilación se corta y te muestra el PCF de la placa activa para que lo agregues con un click. Si hay más de uno, también se corta: dejá uno solo.
+
+Todo corre en este navegador con **YoWASP** (WebAssembly): la primera vez baja los WASM, después quedan cacheados.
 
 Si sale bien: **Binario listo** y un link de descarga en la consola del programador. Ese mismo `.bin` es el que usa **Grabar en flash / SRAM**.
 
@@ -72,10 +77,10 @@ En **Grabar en flash** o **Grabar en SRAM** elegí la opción de subir archivo. 
 
 ## Placa personalizada
 
-**Placa no listada…** en el selector. Definís nombre, device/package de nextpnr, el mapa **ADBUS del FTDI** (programador) y el **PCF** (pines del FPGA). Son dos mapas distintos.
+**Placa no listada…** en el selector. Definís nombre, device/package de nextpnr, VID/PID del USB y el mapa **ADBUS del FTDI** (programador). Los pines del FPGA no van acá: van en el `pins.pcf` del proyecto. Son dos mapas distintos.
 
 Eso se guarda en `localStorage` de **este** navegador. En otra PC no está. El ícono **?** de cada placa abre el pinout y el mapa ADBUS.
 
 ## Laboratorio de arranque
 
-Al cambiar de placa, si no tocaste los `.v`, se carga el laboratorio de esa placa (contador, botones, UART). Si editaste el código, se respeta tu trabajo.
+Al cambiar de placa, si no tocaste el proyecto, se carga el laboratorio de esa placa (contador, botones, UART) con su `pins.pcf`. Si editaste algo, se respeta tu trabajo: el PCF sigue siendo el tuyo.
