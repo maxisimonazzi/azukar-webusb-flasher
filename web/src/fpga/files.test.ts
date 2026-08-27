@@ -3,6 +3,7 @@ import { test } from 'node:test'
 
 import {
   addFpgaFile,
+  sanitizeImportName,
   closeFpgaTab,
   deleteFpgaFile,
   getAllowedImportExtensions,
@@ -29,7 +30,7 @@ test('accepts identifier.v names', () => {
 
 test('getAllowedImportExtensions returns defaults when env is unset', () => {
   const exts = getAllowedImportExtensions()
-  assert.deepEqual(exts, ['v', 'pcf', 'txt'])
+  assert.deepEqual(exts, ['v', 'pcf', 'txt', 'hex'])
 })
 
 test('isAllowedFilename validates extension and safe stem', () => {
@@ -157,4 +158,33 @@ test('projectZipDownloadName follows top module or input name', () => {
   assert.equal(projectZipDownloadName('blinky'), 'blinky.zip')
   assert.equal(projectZipDownloadName('my_project.zip'), 'my_project.zip')
   assert.equal(projectZipDownloadName('   '), 'top_module.zip')
+})
+
+test('sanitizeImportName trades spaces and accents for underscores', () => {
+  assert.equal(sanitizeImportName('mi modulo.v'), 'mi_modulo.v')
+  assert.equal(sanitizeImportName('contador  de   pulsos.v'), 'contador_de_pulsos.v')
+  assert.equal(sanitizeImportName('diseño ñandú.v'), 'dise_o_and.v')
+  assert.equal(sanitizeImportName('pines de la placa.pcf'), 'pines_de_la_placa.pcf')
+})
+
+test('sanitizeImportName keeps a name that was already fine', () => {
+  assert.equal(sanitizeImportName('top_module.v'), 'top_module.v')
+  assert.equal(sanitizeImportName('uart-tx.v'), 'uart-tx.v')
+})
+
+test('sanitizeImportName refuses what does not belong in a project', () => {
+  assert.equal(sanitizeImportName('notas.docx'), null)
+  assert.equal(sanitizeImportName('sin_extension'), null)
+  assert.equal(sanitizeImportName('.oculto.v'), null)
+  assert.equal(sanitizeImportName('   .v'), null)
+})
+
+test('sanitizeImportName does not leave a name starting with a digit', () => {
+  assert.equal(sanitizeImportName('8 bits.v'), '_8_bits.v')
+})
+
+test('zipPathToVerilogName sanitises instead of dropping the file', () => {
+  assert.equal(zipPathToVerilogName('proyecto/mi modulo.v'), 'mi_modulo.v')
+  assert.equal(zipPathToVerilogName('proyecto/ok.v'), 'ok.v')
+  assert.equal(zipPathToVerilogName('__MACOSX/mi modulo.v'), null)
 })

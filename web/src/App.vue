@@ -11,7 +11,16 @@ import ConfirmModal from '@/components/ConfirmModal.vue'
 import CustomBoardModal from '@/components/CustomBoardModal.vue'
 import ExportProjectModal from '@/components/ExportProjectModal.vue'
 import HelpModal from '@/components/HelpModal.vue'
+import HexViewModal from '@/components/HexViewModal.vue'
+import IcebramModal from '@/components/IcebramModal.vue'
 import PcfIssueModal from '@/components/PcfIssueModal.vue'
+import PllModal from '@/components/PllModal.vue'
+import ProblemsPanel from '@/components/ProblemsPanel.vue'
+import ProjectBar from '@/components/ProjectBar.vue'
+import ResourcePanel from '@/components/ResourcePanel.vue'
+import ShareModal from '@/components/ShareModal.vue'
+import SwapLabel from '@/components/ui/SwapLabel.vue'
+import UartPlot from '@/components/UartPlot.vue'
 import { setActiveBoard } from '@/fpga/activeBoard'
 import {
   customBoardProfiles,
@@ -26,7 +35,50 @@ import {
   type BoardProfile,
   type CustomBoardDraft,
 } from '@/fpga/boardTypes'
-import { compileFpga, type CompileBoard } from '@/fpga/compile'
+import {
+  cancelCompile,
+  checkFpga,
+  compileFpga,
+  fetchCompileArtifact,
+  generateBramHex,
+  runBramSwap,
+  runPll,
+  type CompileBoard,
+} from '@/fpga/compile'
+import { ARTIFACT_NAMES, type ArtifactName } from '@/fpga/compileProtocol'
+import { parseToolLog } from '@/fpga/diagnostics'
+import {
+  hexPairMismatch,
+  inspectHexFile,
+  parseIcepllOutput,
+  validatePllRequest,
+  type PllRequest,
+  type PllSummary,
+} from '@/fpga/icetools'
+import {
+  parsePnrReport,
+  parseYosysStat,
+  type BuildRecord,
+  type PnrReport,
+  type YosysStat,
+} from '@/fpga/pnrReport'
+import { checkPcf, findTopPorts, parsePcf, parsePcfFrequencies } from '@/fpga/pcfCheck'
+import {
+  countProblems,
+  fromPcfProblems,
+  fromToolDiagnostics,
+  marksForFile,
+  mergeProblems,
+  type Problem,
+} from '@/fpga/problems'
+import {
+  buildShareUrl,
+  decodeShareProject,
+  encodeShareProject,
+  readShareCode,
+  type ShareProject,
+} from '@/fpga/shareLink'
+import { describeDiff } from '@/fpga/binCompare'
 import {
   addFpgaFile,
   binDownloadName,
@@ -40,11 +92,27 @@ import {
   projectZipDownloadName,
   PROJECT_PCF,
   renameFpgaFile,
+  sanitizeImportName,
+  uniquifyFpgaName,
   visibleFpgaTabs,
   type PcfIssue,
 } from '@/fpga/files'
 import { FLASH_CONSOLE_BYTES, formatHexDump, toIntelHex } from '@/fpga/flashDump'
-import { clearProject, loadProject, saveProject } from '@/fpga/projectStore'
+import {
+  clearProject,
+  createProject,
+  deleteProjectById,
+  loadCurrentProjectId,
+  loadProjectById,
+  loadProjectIndex,
+  migrateLegacyProject,
+  renameProject,
+  saveCurrentProjectId,
+  saveProjectById,
+  touchProject,
+  type ProjectMeta,
+  type StoredProject,
+} from '@/fpga/projectStore'
 import { trimIce40Image } from '@/fpga/flashPlan'
 import {
   closeMpsseSession,
@@ -57,6 +125,7 @@ import {
   readFtdiConfigEeprom,
   readIce40Flash,
   resetIce40FromFlash,
+  verifyIce40Flash,
 } from '@/fpga/programmer'
 import {
   BLINKY_TOP,
@@ -67,16 +136,50 @@ import {
 import {
   UART_BAUD_DEFAULT,
   UART_BAUDS,
-  appendUartText,
   hasWebSerial,
   openUartSession,
   type UartSession,
 } from '@/fpga/uart'
+import {
+  clearUartState,
+  createPlotSeries,
+  createUartState,
+  parsePlotValues,
+  pushPlotSample,
+  pushUartChunk,
+  renderUartHex,
+  renderUartText,
+  UART_LINE_ENDINGS,
+  withLineEnding,
+  type UartLineEnding,
+} from '@/fpga/uartView'
 import { classifyUsbError, usbBannerKey } from '@/fpga/usbErrors'
 import { verilogFilesFromZip, verilogFilesToZip } from '@/fpga/zipVerilog'
+import { setEditorProjectContext } from '@/lib/editorComplete'
+import {
+  ensureWritePermission,
+  hasFsAccess,
+  pickProjectFolder,
+  readFolderFiles,
+  writeFolderFiles,
+  type FsDirectoryHandle,
+} from '@/lib/fsAccess'
 import { isFirefox, WEBSERIAL_FIREFOX_ADDON_URL } from '@/lib/isFirefox'
+import {
+  clearOfflineCache,
+  formatBytes,
+  offlineBytesRef,
+  offlineStatusRef,
+  refreshOfflineBytes,
+} from '@/lib/offline'
 import type { EditorLanguage } from '@/lib/verilogEditor'
 import { readSession, writeSession } from '@/lib/storage'
+import {
+  autoCheckRef,
+  autoVerifyRef,
+  uartHexRef,
+  uartTimestampsRef,
+} from '@/prefs/ide'
 import {
   EDITOR_FONT_MAX,
   EDITOR_FONT_MIN,
@@ -88,7 +191,9 @@ import { beginThemeTransition, setThemePreference, themeRef } from '@/prefs/them
 import { FIREFOX_NOTICE_KEY, type AppLocale, type AppTheme } from '@/prefs/types'
 
 type DumpDest = 'console' | 'bin' | 'hex'
-type FpgaMenu = 'flash' | 'sram' | 'read' | 'eeprom'
+type FpgaMenu = 'flash' | 'sram' | 'read' | 'eeprom' | 'tools'
+/** Pestañas del panel derecho: consola, problemas y recursos del chip. */
+type RightTab = 'log' | 'problems' | 'resources'
 type UsbAction =
   | 'connect'
   | 'disconnect'
@@ -107,7 +212,39 @@ const isDark = computed(() => themeRef.value === 'dark')
 const initialBoard = resolveBoard(loadBoardId())
 setActiveBoard(initialBoard)
 const initialStarter = projectStarter(initialBoard)
-const savedProject = loadProject()
+
+/**
+ * Arranque de los proyectos: migra la versión de un solo proyecto, garantiza
+ * que haya al menos uno y devuelve el que estaba abierto.
+ */
+function bootProjects(): {
+  index: ProjectMeta[]
+  id: string
+  project: StoredProject | null
+} {
+  let index = loadProjectIndex()
+  if (index.length === 0) {
+    migrateLegacyProject('Mi proyecto')
+    index = loadProjectIndex()
+  }
+  if (index.length === 0) {
+    const meta = createProject('Mi proyecto')
+    saveCurrentProjectId(meta.id)
+    index = loadProjectIndex()
+  }
+  let id = loadCurrentProjectId()
+  if (!id || !index.some((p) => p.id === id)) {
+    id = index[0]?.id ?? ''
+    if (id) saveCurrentProjectId(id)
+  }
+  return { index, id, project: id ? loadProjectById(id) : null }
+}
+
+const boot = bootProjects()
+const projects = ref<ProjectMeta[]>(boot.index)
+const currentProjectId = ref(boot.id)
+const savedProject = boot.project
+const showRemoveProject = ref(false)
 const boardId = ref(initialBoard.id)
 const customBoards = ref(customBoardProfiles())
 const customDraft = ref<CustomBoardDraft>(emptyCustomDraft())
@@ -148,18 +285,73 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const zipInput = ref<HTMLInputElement | null>(null)
 const logEl = ref<HTMLElement | null>(null)
 const uartEl = ref<HTMLElement | null>(null)
-const uartText = ref('')
 const uartConnected = ref(false)
 const uartBusy = ref(false)
 const uartBaud = ref<(typeof UART_BAUDS)[number]>(UART_BAUD_DEFAULT)
 let uartSession: UartSession | null = null
-const uartPending: string[] = []
 let uartRaf: number | null = null
 const editorFontPx = editorFontSizeRef
 const binObjectUrl = ref<string | null>(null)
 let stopConnectionWatch: (() => void) | null = null
 let logRaf: number | null = null
 const logPending: string[] = []
+
+// ---- Modo IDE ------------------------------------------------------------
+const editorRef = ref<InstanceType<typeof VerilogEditor> | null>(null)
+const rightTab = ref<RightTab>('log')
+/** Lo que dijeron Yosys y nextpnr en el último compile o revisión. */
+const toolProblems = ref<Problem[]>([])
+const report = ref<PnrReport | null>(null)
+const stat = ref<YosysStat | null>(null)
+const buildHistory = ref<BuildRecord[]>([])
+const checking = ref(false)
+/** El WASM ya se bajó al menos una vez: recién ahí conviene revisar solo. */
+const yosysWarm = ref(false)
+/** Cambió algo desde la última revisión: el indicador lo dice. */
+const checkDirty = ref(true)
+let checkTimer: ReturnType<typeof setTimeout> | null = null
+
+// Compartir por link
+const showShare = ref(false)
+const shareUrl = ref('')
+const pendingShare = ref<ShareProject | null>(null)
+
+// Asistente de PLL
+const showPll = ref(false)
+const pllBusy = ref(false)
+const pllSummary = ref<PllSummary | null>(null)
+const pllVerilog = ref<string | null>(null)
+const pllError = ref<string | null>(null)
+const pllFileName = ref('pll.v')
+
+// Cambiar ROM (icebram)
+const showBram = ref(false)
+const bramBusy = ref(false)
+const bramError = ref<string | null>(null)
+const bramNote = ref<string | null>(null)
+const hasBitstream = ref(false)
+
+// Visor hexadecimal
+const showHexView = ref(false)
+const hexTitle = ref('')
+const hexData = shallowRef<Uint8Array | null>(null)
+
+// Carpeta del disco (File System Access)
+const folderHandle = shallowRef<FsDirectoryHandle | null>(null)
+const folderName = ref('')
+const fsSupported = hasFsAccess()
+
+// Consola UART
+const uartState = createUartState()
+const uartVersion = ref(0)
+const plotSeries = createPlotSeries()
+const plotVersion = ref(0)
+const showPlot = ref(false)
+const uartInput = ref('')
+const uartEnding = ref<UartLineEnding>('lf')
+const uartSendHistory: string[] = []
+let uartHistoryAt = -1
+const uartPendingChunks: { bytes: Uint8Array; text: string; ts: number }[] = []
 
 const slimBtn = '!h-[25px] min-h-[25px] px-2 text-xs rounded-md max-md:!h-8 max-md:min-h-8'
 const dropMenu =
@@ -201,6 +393,125 @@ const lineCount = computed(() => {
 
 const lineCountLabel = computed(() => t('editor.lineCount', { n: lineCount.value }))
 const webserialAddonUrl = WEBSERIAL_FIREFOX_ADDON_URL
+
+// ---- Problemas: lo que dicen las herramientas + el cruce PCF ↔ top --------
+
+const projectFiles = computed(() =>
+  files.value.map((f) => ({ name: f.name, content: f.content })),
+)
+
+const hexFiles = computed(() =>
+  projectFiles.value.filter((f) => f.name.toLowerCase().endsWith('.hex')),
+)
+
+/**
+ * Se recalcula con cada tecla y no cuesta nada: los errores de pines aparecen
+ * antes de compilar, que es donde duelen menos.
+ */
+const pcfProblems = computed(() => {
+  const pick = pickPcfFile(files.value)
+  if (pick.kind !== 'ok') return []
+  const found = findTopPorts(projectFiles.value, top.value.trim() || BLINKY_TOP)
+  return checkPcf({
+    ports: found.ports,
+    constraints: parsePcf(pick.file.content),
+    pcfName: pick.file.name,
+    topName: top.value.trim() || BLINKY_TOP,
+    topFile: found.file,
+  })
+})
+
+const problems = computed(() =>
+  mergeProblems(toolProblems.value, fromPcfProblems(pcfProblems.value)),
+)
+
+/**
+ * Relojes con `set_frequency` en el PCF. Sin esa línea nextpnr compara contra
+ * su default de 12 MHz y el PASA del panel no significa nada.
+ */
+const constrainedClocks = computed(() => {
+  const pick = pickPcfFile(files.value)
+  if (pick.kind !== 'ok') return []
+  return parsePcfFrequencies(pick.file.content).map((f) => f.net)
+})
+const problemCounts = computed(() => countProblems(problems.value))
+const editorMarks = computed(() =>
+  activeFile.value ? marksForFile(problems.value, activeFile.value.name) : [],
+)
+
+/** Traduce el log de las herramientas a problemas con archivo y línea. */
+function readToolLog(log: string) {
+  const pick = pickPcfFile(files.value)
+  const diags = parseToolLog(log.split('\n'), {
+    files: files.value.map((f) => f.name),
+    pcfName: pick.kind === 'ok' ? pick.file.name : undefined,
+  })
+  toolProblems.value = fromToolDiagnostics(diags)
+}
+
+function openProblem(problem: Problem) {
+  if (!problem.file) return
+  if (!files.value.some((f) => f.name === problem.file)) return
+  onOpenFile(problem.file)
+  if (problem.line == null) return
+  void nextTick(() => editorRef.value?.jumpToLine(problem.line as number))
+}
+
+// ---- Revisión rápida (Yosys sin place & route) ----------------------------
+
+/** Estado del indicador de revisión, al lado de las pestañas. */
+const checkState = computed<'checking' | 'stale' | 'clean'>(() => {
+  if (checking.value) return 'checking'
+  return checkDirty.value ? 'stale' : 'clean'
+})
+
+async function onCheck(manual = false) {
+  if (busyCompile.value || checking.value) return
+  checking.value = true
+  try {
+    const result = await checkFpga(projectFiles.value, top.value.trim() || BLINKY_TOP)
+    if (result.status === 'skipped') return
+    yosysWarm.value = true
+    checkDirty.value = false
+    readToolLog(result.log)
+    if (manual) {
+      const { errors, warnings } = problemCounts.value
+      appendLog(
+        errors > 0 || warnings > 0
+          ? t('ide.checkFound', { errors, warnings })
+          : t('ide.checkClean'),
+      )
+      if (errors > 0 || warnings > 0) rightTab.value = 'problems'
+    }
+  } catch (err) {
+    if (manual) appendLog(compileErrorMessage(err))
+  } finally {
+    checking.value = false
+  }
+}
+
+/** Al dejar de escribir. Solo cuando el WASM ya está en el navegador. */
+function scheduleCheck() {
+  if (checkTimer != null) clearTimeout(checkTimer)
+  checkDirty.value = true
+  if (!autoCheckRef.value || !yosysWarm.value) return
+  checkTimer = setTimeout(() => {
+    checkTimer = null
+    void onCheck(false)
+  }, 900)
+}
+
+function onEditorSave() {
+  void onCheck(true)
+}
+
+function onCancelCompile() {
+  if (!cancelCompile()) return
+  // Al matar el worker se va con él el `.asc` del último compile: icebram ya no
+  // tiene con qué trabajar hasta que se compile de nuevo.
+  hasBitstream.value = false
+  appendLog(t('ide.cancelled'))
+}
 
 function logNeedWebSerial() {
   if (isFirefox()) {
@@ -388,18 +699,86 @@ async function onZipFile(ev: Event) {
 
 function flushUart() {
   uartRaf = null
-  if (uartPending.length === 0) return
-  uartText.value = appendUartText(uartText.value, uartPending.splice(0).join(''))
+  if (uartPendingChunks.length === 0) return
+  const before = uartState.lines.length
+  for (const chunk of uartPendingChunks.splice(0)) {
+    pushUartChunk(uartState, chunk.text, chunk.bytes, chunk.ts)
+  }
+  // Cada línea nueva puede ser una muestra para el gráfico.
+  const added = uartState.lines.slice(Math.max(0, before - 1))
+  let plotted = false
+  for (const line of added) {
+    const sample = parsePlotValues(line.text)
+    if (!sample) continue
+    pushPlotSample(plotSeries, sample)
+    plotted = true
+  }
+  if (plotted) plotVersion.value += 1
+  uartVersion.value += 1
 }
 
-function onUartChunk(chunk: string) {
-  uartPending.push(chunk)
+function onUartChunk(bytes: Uint8Array, text: string) {
+  uartPendingChunks.push({ bytes, text, ts: Date.now() })
   if (uartRaf == null) uartRaf = requestAnimationFrame(flushUart)
 }
 
+const uartView = computed(() => {
+  // uartVersion es la dependencia: el buffer se muta en su lugar.
+  void uartVersion.value
+  return uartHexRef.value
+    ? renderUartHex(uartState)
+    : renderUartText(uartState, { timestamps: uartTimestampsRef.value })
+})
+
 function clearUart() {
-  uartPending.length = 0
-  uartText.value = ''
+  uartPendingChunks.length = 0
+  clearUartState(uartState)
+  plotSeries.rows = []
+  plotSeries.labels = []
+  plotVersion.value += 1
+  uartVersion.value += 1
+}
+
+function saveUartLog() {
+  const text = renderUartText(uartState, { timestamps: true })
+  if (!text) return
+  downloadNamed('uart.txt', new Blob([text], { type: 'text/plain;charset=utf-8' }))
+  appendLog(t('uart.logSaved'))
+}
+
+async function sendUart() {
+  const text = uartInput.value
+  if (!uartSession || !text) return
+  try {
+    const ok = await uartSession.write(withLineEnding(text, uartEnding.value))
+    if (!ok) {
+      appendLog(t('uart.writeFailed'))
+      return
+    }
+    uartSendHistory.push(text)
+    if (uartSendHistory.length > 50) uartSendHistory.shift()
+    uartHistoryAt = uartSendHistory.length
+    uartInput.value = ''
+  } catch (err) {
+    appendLog(uartErrorMessage(err))
+  }
+}
+
+/** Flechas arriba/abajo: historial de lo enviado, como en cualquier terminal. */
+function onUartInputKey(ev: KeyboardEvent) {
+  if (ev.key === 'ArrowUp') {
+    if (uartSendHistory.length === 0) return
+    ev.preventDefault()
+    uartHistoryAt = Math.max(0, uartHistoryAt - 1)
+    uartInput.value = uartSendHistory[uartHistoryAt] ?? ''
+    return
+  }
+  if (ev.key === 'ArrowDown') {
+    if (uartSendHistory.length === 0) return
+    ev.preventDefault()
+    uartHistoryAt = Math.min(uartSendHistory.length, uartHistoryAt + 1)
+    uartInput.value = uartSendHistory[uartHistoryAt] ?? ''
+  }
 }
 
 async function onUartConnect() {
@@ -411,7 +790,7 @@ async function onUartConnect() {
   try {
     uartSession = await openUartSession({
       baudRate: uartBaud.value,
-      onText: onUartChunk,
+      onChunk: onUartChunk,
       onDisconnect: () => {
         uartConnected.value = false
         uartSession = null
@@ -545,6 +924,10 @@ function resetProject() {
   top.value = starter.top
   clearBin()
   clearProject()
+  // La carpeta del disco era de lo que había antes: soltarla evita que
+  // "Guardar en <carpeta>" escriba en un lugar que ya no tiene que ver.
+  closeFolder(false)
+  hasBitstream.value = false
   showResetConfirm.value = false
   pcfIssue.value = null
   appendLog(t('fpga.projectResetDone'))
@@ -641,6 +1024,24 @@ function progressPhrase(phase: string): string {
   }
 }
 
+/** Una fila más del historial de builds del panel de recursos. */
+function recordBuild(bytes: number | null) {
+  const lc = report.value?.utilisation.find((u) => u.name === 'ICESTORM_LC') ?? null
+  const fmax = report.value?.fmax[0] ?? null
+  buildHistory.value = [
+    {
+      at: Date.now(),
+      top: top.value.trim() || BLINKY_TOP,
+      lcUsed: lc?.used ?? null,
+      lcAvailable: lc?.available ?? null,
+      fmax: fmax?.achieved ?? null,
+      constraint: fmax?.constraint ?? null,
+      bytes,
+    },
+    ...buildHistory.value,
+  ].slice(0, 8)
+}
+
 async function onCompile() {
   showNoBin.value = false
   if (busyCompile.value) return
@@ -649,22 +1050,44 @@ async function onCompile() {
   appendLog(t('fpga.compileQueuedBrowser'))
   try {
     const result = await compileFpga(
-      files.value.map((f) => ({ name: f.name, content: f.content })),
+      projectFiles.value,
       top.value.trim() || BLINKY_TOP,
       payload,
       (line) => appendLog(line),
     )
+    yosysWarm.value = true
+    checkDirty.value = false
+    readToolLog(result.log)
+    report.value = parsePnrReport(result.report)
+    stat.value = parseYosysStat(result.log, top.value.trim() || BLINKY_TOP)
     if (result.status === 'success' && result.bin) {
+      hasBitstream.value = true
       setBin(result.bin)
       appendLog(t('fpga.binReady', { n: result.bin.length }))
       compileBinLink.value = { n: result.bin.length, name: binDownloadName(top.value) }
+      recordBuild(result.bin.length)
+      const lc = report.value?.utilisation.find((u) => u.name === 'ICESTORM_LC')
+      const fmax = report.value?.fmax[0]
+      if (lc || fmax) {
+        appendLog(
+          t('ide.summaryLine', {
+            used: lc?.used ?? 0,
+            available: lc?.available ?? 0,
+            fmax: fmax ? fmax.achieved.toFixed(2) : '—',
+            constraint: fmax ? fmax.constraint.toFixed(2) : '—',
+          }),
+        )
+      }
     } else if (result.status !== 'success') {
+      hasBitstream.value = false
       appendLog(t('fpga.compileNoBin'))
+      if (problemCounts.value.errors > 0) rightTab.value = 'problems'
     }
   } catch (err) {
+    const code = err instanceof Error ? err.message : ''
+    if (code === 'COMPILE_CANCELLED') return
     appendLog(compileErrorMessage(err))
     // Sin .pcf (o con varios) no hay compile: el modal explica y ofrece el de la placa.
-    const code = err instanceof Error ? err.message : ''
     if (code === 'COMPILE_NO_PCF' || code === 'COMPILE_MANY_PCF') {
       const pick = pickPcfFile(files.value)
       pcfIssue.value = pick.kind === 'ok' ? { kind: 'none' } : pick
@@ -686,7 +1109,7 @@ watch([logText, compileBinLink], async () => {
   if (el) el.scrollTop = el.scrollHeight
 })
 
-watch(uartText, async () => {
+watch(uartVersion, async () => {
   await nextTick()
   const el = uartEl.value
   if (el) el.scrollTop = el.scrollHeight
@@ -705,6 +1128,7 @@ function toggleMenu(id: FpgaMenu) {
       break
     case 'read':
     case 'eeprom':
+    case 'tools':
       break
     default: {
       const _exhaustive: never = id
@@ -772,9 +1196,13 @@ async function runUsb(action: UsbAction, fn: () => Promise<void>) {
 async function doProgram() {
   if (!bin.value) return
   showNoBin.value = false
-  await runUsb('program', () =>
-    programIce40Flash(bin.value!, appendLog, onProgress).then(() => undefined),
-  )
+  await runUsb('program', async () => {
+    await programIce40Flash(bin.value!, appendLog, onProgress)
+    if (!autoVerifyRef.value || !bin.value) return
+    appendLog(t('ide.verifying'))
+    const diff = await verifyIce40Flash(bin.value, appendLog, onProgress)
+    appendLog(diff.equal ? t('ide.verifyOk') : t('ide.verifyBad', { detail: describeDiff(diff) }))
+  })
 }
 
 async function doSram() {
@@ -946,18 +1374,436 @@ function onFile(ev: Event) {
   })
 }
 
+// ---- Verificar lo grabado ------------------------------------------------
+
+async function onVerifyFlash() {
+  closeMenu()
+  if (!bin.value) {
+    showNoBin.value = true
+    return
+  }
+  await runUsb('read', async () => {
+    const diff = await verifyIce40Flash(bin.value!, appendLog, onProgress)
+    appendLog(diff.equal ? t('ide.verifyOk') : t('ide.verifyBad', { detail: describeDiff(diff) }))
+  })
+}
+
+function onShowBinHex() {
+  closeMenu()
+  if (!bin.value) {
+    showNoBin.value = true
+    return
+  }
+  hexTitle.value = t('hex.binTitle', { name: binDownloadName(top.value), n: bin.value.length })
+  hexData.value = bin.value
+  showHexView.value = true
+}
+
+// ---- Compartir el proyecto por link --------------------------------------
+
+async function onShare() {
+  closeMenu()
+  try {
+    const code = await encodeShareProject({
+      top: top.value,
+      boardId: boardId.value,
+      files: projectFiles.value,
+    })
+    shareUrl.value = buildShareUrl(window.location.href, code)
+    showShare.value = true
+  } catch {
+    appendLog(t('share.failed'))
+  }
+}
+
+function isProjectName(name: string): boolean {
+  return normalizeFpgaFilename(name) === name
+}
+
+/** Si la URL trae `#p=…`, se ofrece abrirlo (reemplaza el proyecto actual). */
+async function loadSharedFromHash() {
+  const code = readShareCode(window.location.hash)
+  if (!code) return
+  const project = await decodeShareProject(code)
+  // El link queda limpio pase lo que pase: no queremos preguntar en cada F5.
+  history.replaceState(null, '', window.location.pathname + window.location.search)
+  if (!project) {
+    appendLog(t('share.badLink'))
+    return
+  }
+  pendingShare.value = project
+}
+
+function acceptShared() {
+  const project = pendingShare.value
+  pendingShare.value = null
+  if (!project) return
+  const allowed = project.files.filter((f) => isProjectName(f.name))
+  if (allowed.length === 0) {
+    appendLog(t('share.badLink'))
+    return
+  }
+  if (project.boardId && project.boardId !== boardId.value) applyBoard(project.boardId)
+  files.value = allowed.map((f) => ({ ...f, open: true }))
+  activeName.value = allowed[0]?.name ?? ''
+  if (project.top.trim()) top.value = project.top
+  clearBin()
+  appendLog(t('share.opened', { n: allowed.length }))
+}
+
+// ---- Asistente de PLL (icepll) -------------------------------------------
+
+function openPll() {
+  closeMenu()
+  pllError.value = null
+  showPll.value = true
+}
+
+function pllErrorMessage(code: string): string {
+  switch (code) {
+    case 'PLL_BAD_INPUT':
+      return t('pll.badInput')
+    case 'PLL_BAD_OUTPUT':
+      return t('pll.badOutput')
+    case 'PLL_BAD_NAME':
+      return t('pll.badName')
+    case 'PLL_BAD_FILE':
+      return t('pll.badFile')
+    default:
+      return t('pll.failed')
+  }
+}
+
+async function onPllRun(req: PllRequest) {
+  const invalid = validatePllRequest(req)
+  if (invalid) {
+    pllError.value = pllErrorMessage(invalid)
+    return
+  }
+  pllBusy.value = true
+  pllError.value = null
+  pllSummary.value = null
+  pllVerilog.value = null
+  try {
+    const result = await runPll(req)
+    yosysWarm.value = true
+    if (result.status !== 'success' || !result.verilog) {
+      pllError.value = t('pll.failed')
+      appendLog(result.log)
+      return
+    }
+    pllSummary.value = parseIcepllOutput(result.log)
+    pllVerilog.value = result.verilog
+    pllFileName.value = req.fileName
+  } catch (err) {
+    pllError.value = compileErrorMessage(err)
+  } finally {
+    pllBusy.value = false
+  }
+}
+
+function onPllAdd() {
+  const text = pllVerilog.value
+  const name = pllFileName.value
+  if (!text || !name) return
+  const exists = files.value.some((f) => f.name === name)
+  files.value = exists
+    ? files.value.map((f) => (f.name === name ? { ...f, content: text, open: true } : f))
+    : [...files.value, { name, content: text, open: true }]
+  activeName.value = name
+  showPll.value = false
+  appendLog(t('pll.added', { name }))
+}
+
+// ---- Cambiar el contenido de una ROM sin re-sintetizar (icebram) ----------
+
+function openBram() {
+  closeMenu()
+  bramError.value = null
+  bramNote.value = null
+  showBram.value = true
+}
+
+async function onBramRun(pair: { from: string; to: string }) {
+  const from = hexFiles.value.find((f) => f.name === pair.from)
+  const to = hexFiles.value.find((f) => f.name === pair.to)
+  if (!from || !to) return
+  const fromInfo = inspectHexFile(from.content)
+  const toInfo = inspectHexFile(to.content)
+  if ('error' in fromInfo) {
+    bramError.value = `${from.name}: ${t(`icebram.${fromInfo.error}`)}`
+    return
+  }
+  if ('error' in toInfo) {
+    bramError.value = `${to.name}: ${t(`icebram.${toInfo.error}`)}`
+    return
+  }
+  const mismatch = hexPairMismatch(fromInfo.info, toInfo.info)
+  if (mismatch) {
+    bramError.value = t(`icebram.${mismatch}`)
+    return
+  }
+  bramBusy.value = true
+  bramError.value = null
+  bramNote.value = null
+  try {
+    const result = await runBramSwap(from, to, (line) => appendLog(line))
+    if (result.status !== 'success' || !result.bin) {
+      bramError.value = t('icebram.failed')
+      return
+    }
+    setBin(result.bin)
+    compileBinLink.value = { n: result.bin.length, name: binDownloadName(top.value) }
+    recordBuild(result.bin.length)
+    bramNote.value = t('icebram.done', { n: result.bin.length })
+    appendLog(t('icebram.done', { n: result.bin.length }))
+  } catch (err) {
+    bramError.value = compileErrorMessage(err)
+  } finally {
+    bramBusy.value = false
+  }
+}
+
+async function onBramGenerate(spec: { widthBits: number; words: number; name: string }) {
+  const name = normalizeFpgaFilename(spec.name)
+  if (!name || !name.toLowerCase().endsWith('.hex')) {
+    bramError.value = t('icebram.badName')
+    return
+  }
+  bramBusy.value = true
+  bramError.value = null
+  bramNote.value = null
+  try {
+    const result = await generateBramHex(spec.widthBits, spec.words, (line) => appendLog(line))
+    const hex = result.hex
+    if (result.status !== 'success' || !hex) {
+      bramError.value = t('icebram.genFailed')
+      return
+    }
+    const exists = files.value.some((f) => f.name === name)
+    files.value = exists
+      ? files.value.map((f) => (f.name === name ? { ...f, content: hex, open: true } : f))
+      : [...files.value, { name, content: hex, open: true }]
+    bramNote.value = t('icebram.generated', { name, words: spec.words, bits: spec.widthBits })
+  } catch (err) {
+    bramError.value = compileErrorMessage(err)
+  } finally {
+    bramBusy.value = false
+  }
+}
+
+// ---- Carpeta del disco (File System Access) ------------------------------
+
+/** Soltar la carpeta: el permiso y el destino de "Guardar" dejan de aplicar. */
+function closeFolder(log = true) {
+  if (!folderHandle.value) return
+  const name = folderName.value
+  folderHandle.value = null
+  folderName.value = ''
+  if (log) appendLog(t('folder.closed', { name }))
+}
+
+async function onOpenFolder() {
+  closeMenu()
+  try {
+    const handle = await pickProjectFolder()
+    if (!handle) return
+    const allowedExts = getAllowedImportExtensions()
+    // Los nombres terminan en la línea de comandos del WASM: los espacios y los
+    // acentos entran como `_` en vez de quedar afuera.
+    const renamed: string[] = []
+    const taken = new Set<string>()
+    const found = (
+      await readFolderFiles(handle, (name) => {
+        const safe = sanitizeImportName(name, allowedExts)
+        if (!safe) return null
+        const unique = uniquifyFpgaName(safe, taken)
+        taken.add(unique)
+        if (unique !== name) renamed.push(`${name} → ${unique}`)
+        return unique
+      })
+    ).map((f) => ({ ...f, open: true }))
+    if (found.length === 0) {
+      appendLog(t('folder.empty', { exts: allowedExts.map((e) => `.${e}`).join(', ') }))
+      return
+    }
+    flushProjectSave()
+    closeFolder(false)
+    folderHandle.value = handle
+    folderName.value = handle.name
+    files.value = found
+    activeName.value = found[0]?.name ?? ''
+    clearBin()
+    hasBitstream.value = false
+    appendLog(t('folder.opened', { n: found.length, name: handle.name }))
+    if (renamed.length) appendLog(t('folder.renamed', { list: renamed.join(', ') }))
+  } catch (err) {
+    appendLog(err instanceof Error ? err.message : t('folder.failed'))
+  }
+}
+
+async function onSaveFolder() {
+  closeMenu()
+  const handle = folderHandle.value
+  if (!handle) return
+  try {
+    if (!(await ensureWritePermission(handle))) {
+      appendLog(t('folder.noPermission'))
+      return
+    }
+    const written = await writeFolderFiles(handle, projectFiles.value)
+    appendLog(t('folder.saved', { n: written, name: handle.name }))
+  } catch (err) {
+    appendLog(err instanceof Error ? err.message : t('folder.failed'))
+  }
+}
+
+// ---- Proyectos guardados en el navegador ---------------------------------
+
+const currentProjectName = computed(
+  () => projects.value.find((p) => p.id === currentProjectId.value)?.name ?? '',
+)
+
+/** Al cambiar de proyecto, lo que era del anterior deja de aplicar. */
+function detachWorkspace() {
+  clearBin()
+  hasBitstream.value = false
+  report.value = null
+  stat.value = null
+  toolProblems.value = []
+  buildHistory.value = []
+  closeFolder(false)
+}
+
+function applyProject(project: StoredProject | null) {
+  const starter = projectStarter(activeProfile())
+  if (project) {
+    files.value = project.files.map((f) => ({ ...f }))
+    activeName.value = project.activeName || files.value[0]?.name || ''
+    top.value = project.top.trim() || starter.top
+  } else {
+    files.value = cloneStarterFiles(starter)
+    activeName.value = starter.files[0]?.name ?? PROJECT_PCF
+    top.value = starter.top
+  }
+}
+
+function onSelectProject(id: string) {
+  if (id === currentProjectId.value) return
+  if (!projects.value.some((p) => p.id === id)) return
+  flushProjectSave()
+  detachWorkspace()
+  currentProjectId.value = id
+  saveCurrentProjectId(id)
+  applyProject(loadProjectById(id))
+  appendLog(t('project.opened', { name: currentProjectName.value }))
+}
+
+function onCreateProject() {
+  flushProjectSave()
+  const meta = createProject()
+  projects.value = loadProjectIndex()
+  detachWorkspace()
+  currentProjectId.value = meta.id
+  saveCurrentProjectId(meta.id)
+  applyProject(null)
+  appendLog(t('project.created', { name: meta.name }))
+}
+
+function onRenameProject(name: string) {
+  projects.value = renameProject(currentProjectId.value, name)
+  appendLog(t('project.renamed', { name: currentProjectName.value }))
+}
+
+function askRemoveProject() {
+  if (projects.value.length <= 1) return
+  showRemoveProject.value = true
+}
+
+function removeProject() {
+  showRemoveProject.value = false
+  const gone = currentProjectName.value
+  const rest = deleteProjectById(currentProjectId.value)
+  projects.value = rest
+  const next = rest[0]
+  detachWorkspace()
+  if (next) {
+    currentProjectId.value = next.id
+    saveCurrentProjectId(next.id)
+    applyProject(loadProjectById(next.id))
+  } else {
+    const meta = createProject('Mi proyecto')
+    projects.value = loadProjectIndex()
+    currentProjectId.value = meta.id
+    saveCurrentProjectId(meta.id)
+    applyProject(null)
+  }
+  appendLog(t('project.removed', { name: gone, open: currentProjectName.value }))
+}
+
+// ---- Descargas del último compile -----------------------------------------
+
+function artifactDownloadName(name: ArtifactName): string {
+  const stem = top.value.trim() || BLINKY_TOP
+  const ext = name.slice(name.indexOf('.') + 1)
+  return `${stem}.${ext}`
+}
+
+async function onDownloadArtifact(name: ArtifactName) {
+  closeMenu()
+  try {
+    const out = await fetchCompileArtifact(name)
+    if (out.status !== 'success') {
+      appendLog(t('tools.artifactMissing', { name }))
+      return
+    }
+    const fileName = artifactDownloadName(name)
+    if (out.bin) {
+      downloadNamed(fileName, new Blob([out.bin], { type: 'application/octet-stream' }))
+    } else if (out.text != null) {
+      downloadNamed(fileName, new Blob([out.text], { type: 'text/plain;charset=utf-8' }))
+    } else {
+      appendLog(t('tools.artifactMissing', { name }))
+      return
+    }
+    appendLog(t('tools.artifactSaved', { name: fileName }))
+  } catch (err) {
+    appendLog(compileErrorMessage(err))
+  }
+}
+
+function onExportLog() {
+  if (!logText.value) return
+  downloadNamed('consola.txt', new Blob([logText.value], { type: 'text/plain;charset=utf-8' }))
+  appendLog(t('fpga.logExported'))
+}
+
+// ---- Sin conexión ---------------------------------------------------------
+
+async function onClearOffline() {
+  closeMenu()
+  await clearOfflineCache()
+  appendLog(t('offline.cleared'))
+}
+
 // El proyecto vive en el browser: si no queda en localStorage, se pierde al recargar.
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 let warnedProjectTooBig = false
 
 function persistProject() {
   saveTimer = null
-  const ok = saveProject({
+  const id = currentProjectId.value
+  if (!id) return
+  const ok = saveProjectById(id, {
     top: top.value,
     activeName: activeName.value,
     files: files.value.map((f) => ({ name: f.name, content: f.content, open: f.open })),
   })
-  if (ok || warnedProjectTooBig) return
+  if (ok) {
+    projects.value = touchProject(id, Date.now())
+    return
+  }
+  if (warnedProjectTooBig) return
   warnedProjectTooBig = true
   appendLog(t('fpga.projectTooBig'))
 }
@@ -975,6 +1821,23 @@ function flushProjectSave() {
 
 watch([files, top, activeName], scheduleProjectSave, { deep: true })
 
+// El autocompletado lee el proyecto desde afuera del componente del editor.
+watch(
+  [files, top, activeBoard],
+  () => {
+    setEditorProjectContext({
+      files: projectFiles.value,
+      top: top.value.trim() || BLINKY_TOP,
+      boardPcf: activeBoard.value.starterPcf,
+      clocks: activeBoard.value.fpga.clocks ?? [],
+    })
+  },
+  { deep: true, immediate: true },
+)
+
+// Revisión rápida al dejar de escribir (si está activada y el WASM ya está).
+watch([files, top], scheduleCheck, { deep: true })
+
 onMounted(() => {
   stopConnectionWatch = onMpsseConnectionChange((open) => {
     boardConnected.value = open
@@ -983,6 +1846,8 @@ onMounted(() => {
   window.addEventListener('beforeunload', flushProjectSave)
   if (savedProject) appendLog(t('fpga.projectRestored', { n: savedProject.files.length }))
   scheduleProjectSave()
+  void loadSharedFromHash()
+  void refreshOfflineBytes()
   if (!isFirefox()) return
   try {
     if (readSession(FIREFOX_NOTICE_KEY) === '1') return
@@ -999,6 +1864,7 @@ onBeforeUnmount(() => {
   stopConnectionWatch?.()
   if (logRaf != null) cancelAnimationFrame(logRaf)
   if (uartRaf != null) cancelAnimationFrame(uartRaf)
+  if (checkTimer != null) clearTimeout(checkTimer)
   if (binObjectUrl.value) URL.revokeObjectURL(binObjectUrl.value)
   void uartSession?.close()
   void closeMpsseSession()
@@ -1091,6 +1957,14 @@ onBeforeUnmount(() => {
     <div class="flex min-h-0 flex-1 gap-4 overflow-hidden px-4 py-3 max-desk:flex-none max-desk:flex-col max-desk:overflow-visible max-md:gap-3 max-md:px-3">
       <section class="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-border bg-surface max-desk:flex-none max-md:flex-col">
         <aside class="flex shrink-0 flex-col overflow-y-auto border-r border-border max-md:w-full max-md:flex-none max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-r-0 max-md:border-b md:w-[11.5rem]">
+          <ProjectBar
+            :projects="projects"
+            :current-id="currentProjectId"
+            @select="onSelectProject"
+            @create="onCreateProject"
+            @rename="onRenameProject"
+            @remove="askRemoveProject"
+          />
           <div class="px-2 pt-3 pb-1">
             <label class="mb-1 block text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase" for="fpga-top">
               {{ t('fpga.topModule') }}
@@ -1231,6 +2105,79 @@ onBeforeUnmount(() => {
                   <path d="M5 20h14v-2H5v2zm7-18l-5 5h3v6h4V7h3l-5-5z" />
                 </svg>
               </button>
+              <div data-fpga-drop class="relative">
+                <button
+                  type="button"
+                  class="inline-flex h-[25px] cursor-pointer items-center rounded-md border border-border bg-surface px-2 text-xs font-semibold text-fg hover:bg-surface-2 max-md:h-8"
+                  :title="t('tools.menuHint')"
+                  @click="toggleMenu('tools')"
+                >
+                  {{ t('tools.menu') }} ▾
+                </button>
+                <div v-if="openMenu === 'tools'" :class="dropMenuEnd">
+                  <button type="button" :class="dropItem" @click="onShare">
+                    {{ t('tools.share') }}
+                  </button>
+                  <button
+                    v-if="fsSupported"
+                    type="button"
+                    :class="dropItem"
+                    @click="onOpenFolder"
+                  >
+                    {{ t('tools.openFolder') }}
+                  </button>
+                  <button
+                    v-if="fsSupported"
+                    type="button"
+                    :class="dropItem"
+                    :disabled="!folderHandle"
+                    :style="folderHandle ? '' : 'opacity:.4;cursor:default'"
+                    @click="folderHandle && onSaveFolder()"
+                  >
+                    {{ folderName ? t('tools.saveFolderNamed', { name: folderName }) : t('tools.saveFolder') }}
+                  </button>
+                  <button
+                    v-if="fsSupported && folderHandle"
+                    type="button"
+                    :class="dropItem"
+                    @click="closeMenu(); closeFolder()"
+                  >
+                    {{ t('tools.closeFolder', { name: folderName }) }}
+                  </button>
+                  <div class="my-1 border-t border-border" />
+                  <p class="px-3 pt-1 text-[0.625rem] font-bold tracking-[0.14em] text-muted uppercase">
+                    {{ t('tools.artifacts') }}
+                  </p>
+                  <button
+                    v-for="name in ARTIFACT_NAMES"
+                    :key="name"
+                    type="button"
+                    :class="dropItem"
+                    :style="hasBitstream ? '' : 'opacity:.4;cursor:default'"
+                    :title="t('tools.artifactHint_' + name.replace('.', '_'))"
+                    @click="hasBitstream && onDownloadArtifact(name)"
+                  >
+                    {{ name }} <span class="text-muted">— {{ t('tools.artifactHint_' + name.replace('.', '_')) }}</span>
+                  </button>
+                  <div class="my-1 border-t border-border" />
+                  <button type="button" :class="dropItem" @click="openPll">
+                    {{ t('tools.pll') }}
+                  </button>
+                  <button type="button" :class="dropItem" @click="openBram">
+                    {{ t('tools.icebram') }}
+                  </button>
+                  <button type="button" :class="dropItem" @click="onShowBinHex">
+                    {{ t('tools.hexView') }}
+                  </button>
+                  <div class="my-1 border-t border-border" />
+                  <p class="px-3 py-1 text-[0.6875rem] text-muted">
+                    {{ t('offline.status', { state: t(`offline.state_${offlineStatusRef}`), size: formatBytes(offlineBytesRef) }) }}
+                  </p>
+                  <button type="button" :class="dropItem" @click="onClearOffline">
+                    {{ t('offline.clear') }}
+                  </button>
+                </div>
+              </div>
               <button
                 type="button"
                 class="cursor-pointer rounded-md p-1.5 text-muted hover:bg-surface hover:text-error"
@@ -1272,11 +2219,14 @@ onBeforeUnmount(() => {
             <VerilogEditor
               v-if="activeFile"
               :key="activeName"
+              ref="editorRef"
               :model-value="activeFile.content"
               :font-size="editorFontPx"
               :language="editorLanguage"
+              :marks="editorMarks"
               height-class="h-full min-h-0"
               @update:model-value="setActiveContent"
+              @save="onEditorSave"
             />
             <p v-else class="p-4 text-sm text-muted">
               {{ t('fpga.noOpenTab') }}
@@ -1318,7 +2268,10 @@ onBeforeUnmount(() => {
                   :title="t('fpga.connectProgrammerHint')"
                   @click="onConnect"
                 >
-                  {{ usbAction === 'connect' ? t('fpga.connectingProgrammer') : t('fpga.connectProgrammer') }}
+                  <SwapLabel
+                    :options="[t('fpga.connectProgrammer'), t('fpga.connectingProgrammer')]"
+                    :index="usbAction === 'connect' ? 1 : 0"
+                  />
                 </AppButton>
                 <AppButton
                   size="sm"
@@ -1328,7 +2281,10 @@ onBeforeUnmount(() => {
                   :title="t('fpga.disconnectProgrammerHint')"
                   @click="onDisconnect"
                 >
-                  {{ usbAction === 'disconnect' ? t('fpga.closingProgrammer') : t('fpga.disconnectProgrammer') }}
+                  <SwapLabel
+                    :options="[t('fpga.disconnectProgrammer'), t('fpga.closingProgrammer')]"
+                    :index="usbAction === 'disconnect' ? 1 : 0"
+                  />
                 </AppButton>
                 <AppButton
                   v-if="showReconnect"
@@ -1339,25 +2295,56 @@ onBeforeUnmount(() => {
                   :title="t('fpga.reconnectHint')"
                   @click="onReconnect"
                 >
-                  {{ usbAction === 'reconnect' ? t('fpga.reconnecting') : t('fpga.reconnect') }}
+                  <SwapLabel
+                    :options="[t('fpga.reconnect'), t('fpga.reconnecting')]"
+                    :index="usbAction === 'reconnect' ? 1 : 0"
+                  />
                 </AppButton>
-                <button
-                  type="button"
-                  class="ml-auto text-xs font-semibold text-muted hover:text-fg disabled:opacity-30"
-                  :disabled="!logText"
-                  @click="clearLog"
+                <!-- Reset vive con conectar/desconectar: es de la placa, no del
+                     flujo de compilar y grabar. Así la fila de abajo entra en una. -->
+                <AppButton
+                  size="sm"
+                  variant="outline"
+                  :class="slimBtn"
+                  :disabled="usbBusy"
+                  :title="t('fpga.resetHint')"
+                  @click="onReset"
                 >
-                  {{ t('fpga.clearConsole') }}
-                </button>
+                  {{ t('fpga.reset') }}
+                </AppButton>
+                <div class="ml-auto flex items-center gap-3">
+                  <button
+                    type="button"
+                    class="text-xs font-semibold text-muted hover:text-fg disabled:opacity-30"
+                    :disabled="!logText"
+                    :title="t('fpga.exportConsoleHint')"
+                    @click="onExportLog"
+                  >
+                    {{ t('fpga.exportConsole') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="text-xs font-semibold text-muted hover:text-fg disabled:opacity-30"
+                    :disabled="!logText"
+                    @click="clearLog"
+                  >
+                    {{ t('fpga.clearConsole') }}
+                  </button>
+                </div>
               </div>
               <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <!-- Un botón, dos roles: mientras compila, el mismo cancela. -->
                 <AppButton
                   size="sm"
                   :class="slimBtn"
-                  :disabled="uiLocked || usbBusy"
-                  @click="onCompile"
+                  :disabled="!busyCompile && usbBusy"
+                  :title="busyCompile ? t('ide.cancelHint') : t('fpga.compileHint')"
+                  @click="busyCompile ? onCancelCompile() : onCompile()"
                 >
-                  {{ busyCompile ? t('fpga.compiling') : t('fpga.compile') }}
+                  <SwapLabel
+                    :options="[t('fpga.compile'), t('fpga.compilingCancel')]"
+                    :index="busyCompile ? 1 : 0"
+                  />
                 </AppButton>
                 <div data-fpga-drop class="relative">
                   <button
@@ -1366,7 +2353,10 @@ onBeforeUnmount(() => {
                     :class="usbBusy || uiLocked ? 'pointer-events-none opacity-60' : ''"
                     @click="toggleMenu('flash')"
                   >
-                    {{ usbAction === 'program' ? t('fpga.flashing') : t('fpga.flash') }}
+                    <SwapLabel
+                      :options="[t('fpga.flash'), t('fpga.flashing')]"
+                      :index="usbAction === 'program' ? 1 : 0"
+                    />
                   </button>
                   <div v-if="openMenu === 'flash'" :class="dropMenuStart">
                     <button type="button" :class="dropItem" @click="onFlashCompiled">
@@ -1375,6 +2365,14 @@ onBeforeUnmount(() => {
                     <button type="button" :class="dropItem" @click="onFlashUpload">
                       {{ t('fpga.flashUpload') }}
                     </button>
+                    <div class="my-1 border-t border-border" />
+                    <button type="button" :class="dropItem" @click="onVerifyFlash">
+                      {{ t('ide.verify') }}
+                    </button>
+                    <label class="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm text-fg hover:bg-surface-2">
+                      <input v-model="autoVerifyRef" type="checkbox" class="accent-primary">
+                      {{ t('ide.autoVerify') }}
+                    </label>
                   </div>
                 </div>
                 <div data-fpga-drop class="relative">
@@ -1385,7 +2383,10 @@ onBeforeUnmount(() => {
                     :title="t('fpga.sramHint')"
                     @click="toggleMenu('sram')"
                   >
-                    {{ usbAction === 'sram' ? t('fpga.sramming') : t('fpga.sram') }}
+                    <SwapLabel
+                      :options="[t('fpga.sram'), t('fpga.sramming')]"
+                      :index="usbAction === 'sram' ? 1 : 0"
+                    />
                   </button>
                   <div v-if="openMenu === 'sram'" :class="dropMenuStart">
                     <button type="button" :class="dropItem" @click="onSramCompiled">
@@ -1397,7 +2398,10 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
                 <AppButton size="sm" variant="outline" :class="slimBtn" :disabled="usbBusy" @click="onErase">
-                  {{ usbAction === 'erase' ? t('fpga.erasing') : t('fpga.eraseFlash') }}
+                  <SwapLabel
+                    :options="[t('fpga.eraseFlash'), t('fpga.erasing')]"
+                    :index="usbAction === 'erase' ? 1 : 0"
+                  />
                 </AppButton>
                 <div data-fpga-drop class="relative">
                   <button
@@ -1406,7 +2410,10 @@ onBeforeUnmount(() => {
                     :class="usbBusy ? 'pointer-events-none opacity-60' : ''"
                     @click="toggleMenu('read')"
                   >
-                    {{ usbAction === 'read' ? t('fpga.reading') : t('fpga.readFlash') }}
+                    <SwapLabel
+                      :options="[t('fpga.readFlash'), t('fpga.reading')]"
+                      :index="usbAction === 'read' ? 1 : 0"
+                    />
                   </button>
                   <div v-if="openMenu === 'read'" :class="dropMenuEnd">
                     <button type="button" :class="dropItem" @click="onReadFlash('bin')">{{ t('fpga.readDownloadBin') }}</button>
@@ -1422,7 +2429,10 @@ onBeforeUnmount(() => {
                     :title="t('fpga.readEepromHint')"
                     @click="toggleMenu('eeprom')"
                   >
-                    {{ usbAction === 'eeprom' ? t('fpga.eepromBusy') : t('fpga.readEeprom') }}
+                    <SwapLabel
+                      :options="[t('fpga.readEeprom'), t('fpga.eepromBusy')]"
+                      :index="usbAction === 'eeprom' ? 1 : 0"
+                    />
                   </button>
                   <div v-if="openMenu === 'eeprom'" :class="dropMenuEnd">
                     <button type="button" :class="dropItem" @click="onReadEeprom('bin')">{{ t('fpga.readDownloadBin') }}</button>
@@ -1430,9 +2440,6 @@ onBeforeUnmount(() => {
                     <button type="button" :class="dropItem" @click="onReadEeprom('console')">{{ t('fpga.readShowConsole') }}</button>
                   </div>
                 </div>
-                <AppButton size="sm" variant="outline" :class="slimBtn" :disabled="usbBusy" @click="onReset">
-                  {{ t('fpga.reset') }}
-                </AppButton>
               </div>
               <div v-if="showProgress" class="mt-1.5">
                 <div class="mb-1 flex justify-between text-xs text-muted">
@@ -1444,7 +2451,64 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
-            <div ref="logEl" class="min-h-0 flex-1 overflow-y-auto">
+            <div class="flex shrink-0 items-center gap-1 border-b border-border px-2" role="tablist">
+              <button
+                v-for="tab in (['log', 'problems', 'resources'] as RightTab[])"
+                :key="tab"
+                type="button"
+                role="tab"
+                :aria-selected="rightTab === tab"
+                class="cursor-pointer border-b-2 px-2 py-1.5 text-xs font-semibold"
+                :class="
+                  rightTab === tab
+                    ? 'border-primary text-fg'
+                    : 'border-transparent text-muted hover:text-fg'
+                "
+                @click="rightTab = tab"
+              >
+                {{ t(`ide.tab_${tab}`) }}
+                <span
+                  v-if="tab === 'problems' && problems.length"
+                  class="ml-1 rounded px-1 text-[0.625rem]"
+                  :class="problemCounts.errors ? 'bg-error/15 text-error' : 'bg-warning/20 text-warning'"
+                >{{ problems.length }}</span>
+              </button>
+              <!-- El estado de la revisión: dice si lo que ves está al día y
+                   corre una nueva con un click. Reemplaza al botón Revisar. -->
+              <button
+                type="button"
+                class="ml-auto inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[0.6875rem] hover:bg-surface-2 disabled:cursor-default"
+                :class="{
+                  'text-muted': checkState !== 'clean',
+                  'text-success': checkState === 'clean',
+                }"
+                :disabled="checking || busyCompile"
+                :title="t('ide.checkHint')"
+                @click="onCheck(true)"
+              >
+                <span
+                  class="inline-block h-1.5 w-1.5 rounded-full"
+                  :class="{
+                    'bg-warning': checkState === 'stale',
+                    'bg-primary': checkState === 'checking',
+                    'bg-success': checkState === 'clean',
+                  }"
+                  aria-hidden="true"
+                />
+                <SwapLabel
+                  :options="[t('ide.stateStale'), t('ide.stateChecking'), t('ide.stateClean')]"
+                  :index="checkState === 'checking' ? 1 : checkState === 'clean' ? 2 : 0"
+                />
+              </button>
+              <label
+                class="flex cursor-pointer items-center gap-1 text-[0.6875rem] text-muted"
+                :title="t('ide.autoCheckHint')"
+              >
+                <input v-model="autoCheckRef" type="checkbox" class="accent-primary">
+                {{ t('ide.autoCheck') }}
+              </label>
+            </div>
+            <div v-show="rightTab === 'log'" ref="logEl" class="min-h-0 flex-1 overflow-y-auto">
               <pre class="p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-fg">{{
                 logText || t('fpga.logEmpty')
               }}</pre>
@@ -1456,6 +2520,19 @@ onBeforeUnmount(() => {
                 :title="t('fpga.downloadBinHint')"
               >{{ t('fpga.binConsoleLink', { name: compileBinLink.name, n: compileBinLink.n }) }}</a>
             </div>
+            <ProblemsPanel
+              v-if="rightTab === 'problems'"
+              :items="problems"
+              :checking="checking"
+              @select="openProblem"
+            />
+            <ResourcePanel
+              v-if="rightTab === 'resources'"
+              :report="report"
+              :stat="stat"
+              :history="buildHistory"
+              :constrained="constrainedClocks"
+            />
           </div>
           <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface max-desk:h-52 max-desk:flex-none">
             <div class="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border px-2 py-1.5">
@@ -1482,7 +2559,10 @@ onBeforeUnmount(() => {
                 :title="t('fpga.connectUartHint')"
                 @click="onUartConnect"
               >
-                {{ uartBusy && !uartConnected ? t('fpga.connectingUart') : t('fpga.connectUart') }}
+                <SwapLabel
+                  :options="[t('fpga.connectUart'), t('fpga.connectingUart')]"
+                  :index="uartBusy && !uartConnected ? 1 : 0"
+                />
               </AppButton>
               <AppButton
                 size="sm"
@@ -1497,17 +2577,75 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="ml-auto text-xs font-semibold text-muted hover:text-fg disabled:opacity-30"
-                :disabled="!uartText"
+                :disabled="!uartView"
                 @click="clearUart"
               >
                 {{ t('fpga.clearConsole') }}
               </button>
             </div>
-            <div ref="uartEl" class="min-h-0 flex-1 overflow-y-auto">
+            <div class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-2 py-1">
+              <label class="flex cursor-pointer items-center gap-1 text-[0.6875rem] text-muted">
+                <input v-model="uartTimestampsRef" type="checkbox" class="accent-primary">
+                {{ t('uart.timestamps') }}
+              </label>
+              <label class="flex cursor-pointer items-center gap-1 text-[0.6875rem] text-muted">
+                <input v-model="uartHexRef" type="checkbox" class="accent-primary">
+                {{ t('uart.hex') }}
+              </label>
+              <label
+                class="flex cursor-pointer items-center gap-1 text-[0.6875rem] text-muted"
+                :title="t('uart.plotHint')"
+              >
+                <input v-model="showPlot" type="checkbox" class="accent-primary">
+                {{ t('uart.plot') }}
+              </label>
+              <button
+                type="button"
+                class="ml-auto text-[0.6875rem] font-semibold text-muted hover:text-fg disabled:opacity-30"
+                :disabled="!uartView"
+                @click="saveUartLog"
+              >
+                {{ t('uart.saveLog') }}
+              </button>
+            </div>
+            <UartPlot
+              v-if="showPlot"
+              :series="plotSeries"
+              :version="plotVersion"
+              class="min-h-[6rem]"
+            />
+            <div v-show="!showPlot" ref="uartEl" class="min-h-0 flex-1 overflow-y-auto">
               <pre class="p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-fg">{{
-                uartText || t('fpga.uartEmpty')
+                uartView || t('fpga.uartEmpty')
               }}</pre>
             </div>
+            <form
+              class="flex shrink-0 items-center gap-1.5 border-t border-border px-2 py-1.5"
+              @submit.prevent="sendUart"
+            >
+              <input
+                v-model="uartInput"
+                class="min-w-0 flex-1 rounded-md border border-border bg-surface-2 px-2 py-1 font-mono text-xs text-fg"
+                :placeholder="t('uart.sendPlaceholder')"
+                :disabled="!uartConnected"
+                @keydown="onUartInputKey"
+              >
+              <select
+                v-model="uartEnding"
+                class="h-[25px] rounded-md border border-border bg-surface-2 px-1 font-mono text-[0.6875rem] max-md:h-8"
+                :title="t('uart.endingHint')"
+              >
+                <option v-for="e in UART_LINE_ENDINGS" :key="e" :value="e">{{ t(`uart.ending_${e}`) }}</option>
+              </select>
+              <AppButton
+                size="sm"
+                type="submit"
+                :class="slimBtn"
+                :disabled="!uartConnected || !uartInput"
+              >
+                {{ t('uart.send') }}
+              </AppButton>
+            </form>
           </div>
         </div>
       </section>
@@ -1601,6 +2739,56 @@ onBeforeUnmount(() => {
       :initial-name="top.trim().replace(/\.v$/i, '') || 'top_module'"
       @export="handleConfirmExport"
       @close="showExportModal = false"
+    />
+    <PllModal
+      :open="showPll"
+      :busy="pllBusy"
+      :default-input-mhz="12"
+      :summary="pllSummary"
+      :verilog="pllVerilog"
+      :error="pllError"
+      @run="onPllRun"
+      @add="onPllAdd"
+      @close="showPll = false"
+    />
+    <IcebramModal
+      :open="showBram"
+      :busy="bramBusy"
+      :hex-files="hexFiles"
+      :has-bitstream="hasBitstream"
+      :error="bramError"
+      :note="bramNote"
+      @run="onBramRun"
+      @generate="onBramGenerate"
+      @close="showBram = false"
+    />
+    <ShareModal
+      :open="showShare"
+      :url="shareUrl"
+      :file-count="files.length"
+      @close="showShare = false"
+    />
+    <HexViewModal
+      :open="showHexView"
+      :title="hexTitle"
+      :data="hexData"
+      @close="showHexView = false"
+    />
+    <ConfirmModal
+      :open="showRemoveProject"
+      :title="t('project.removeTitle')"
+      :body="t('project.removeBody', { name: currentProjectName })"
+      :confirm-label="t('project.removeConfirm')"
+      @confirm="removeProject"
+      @close="showRemoveProject = false"
+    />
+    <ConfirmModal
+      :open="pendingShare != null"
+      :title="t('share.openTitle')"
+      :body="t('share.openBody', { n: pendingShare?.files.length ?? 0 })"
+      :confirm-label="t('share.openConfirm')"
+      @confirm="acceptShared"
+      @close="pendingShare = null"
     />
   </div>
 </template>

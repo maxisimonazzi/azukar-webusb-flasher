@@ -79,6 +79,8 @@ set_io -nowarn ADC_INT 90 # input
 # -------------------------- SYSTEM CLOCK -------------------------------------
 set_io -nowarn CLK 49 # input
 
+set_frequency CLK 12
+
 # -------------------------- FTDI ---------------------------------------------
 # --- FTDI 0:
 set_io -nowarn RES 66 # input

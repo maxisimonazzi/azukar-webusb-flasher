@@ -2,7 +2,7 @@ export type FpgaFile = { name: string; content: string; open: boolean }
 
 export const FPGA_NAME_RE = /^[A-Za-z_][A-Za-z0-9_-]*\.v$/
 export const FPGA_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
-export const DEFAULT_ALLOWED_IMPORT_EXTENSIONS = ['v', 'pcf', 'txt']
+export const DEFAULT_ALLOWED_IMPORT_EXTENSIONS = ['v', 'pcf', 'txt', 'hex']
 
 export function getAllowedImportExtensions(): string[] {
   const envVal =
@@ -84,6 +84,36 @@ export function normalizeFpgaFilename(
   return null
 }
 
+/**
+ * Nombre de afuera (zip o carpeta del disco) a uno que la toolchain pueda
+ * comer: los nombres terminan en la línea de comandos del WASM y adentro de los
+ * `$readmemh`, así que espacios y acentos pasan a ser `_`.
+ *
+ *   "mi modulo.v" → "mi_modulo.v"
+ *   "8 bits.v"    → "_8_bits.v"   (un identificador no arranca con número)
+ *   "notas.docx"  → null          (extensión no permitida)
+ */
+export function sanitizeImportName(
+  raw: string,
+  allowedExts: string[] = getAllowedImportExtensions(),
+): string | null {
+  const base = raw.replace(/\\/g, '/').split('/').pop()?.trim() ?? ''
+  if (!base || base.startsWith('.')) return null
+  const dotIndex = base.lastIndexOf('.')
+  if (dotIndex <= 0) return null
+  const ext = base.slice(dotIndex + 1).toLowerCase()
+  if (!allowedExts.includes(ext)) return null
+
+  const stem = base
+    .slice(0, dotIndex)
+    .replace(/[^A-Za-z0-9_-]+/g, '_')
+    .replace(/_{2,}/g, '_')
+    .replace(/^[-_]+|[-_]+$/g, '')
+  if (!stem) return null
+  const safe = /^[A-Za-z_]/.test(stem) ? stem : `_${stem}`
+  return `${safe}.${ext}`
+}
+
 export function binDownloadName(top: string): string {
   const stem = top.trim()
   if (FPGA_IDENT_RE.test(stem)) return `${stem}.bin`
@@ -152,8 +182,9 @@ export function zipPathToVerilogName(
   const base = parts.length ? parts[parts.length - 1] : ''
   if (!base) return null
   if (parts.some((p: string) => p === '__MACOSX' || p.startsWith('.'))) return null
-  if (!isAllowedFilename(base, allowedExts)) return null
-  return base
+  if (isAllowedFilename(base, allowedExts)) return base
+  // Un `.v` con espacios entra igual, con el nombre saneado.
+  return sanitizeImportName(base, allowedExts)
 }
 
 export function uniquifyFpgaName(name: string, taken: Set<string>): string {

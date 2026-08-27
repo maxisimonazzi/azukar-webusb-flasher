@@ -87,6 +87,8 @@ set_io -nowarn B3_12 20
 # -------------------------- SYSTEM CLOCK -------------------------------------
 set_io -nowarn CLK 94 # input
 
+set_frequency CLK 12
+
 # ------------ Reset ---------------
 set_io -nowarn RST 37 # input
 

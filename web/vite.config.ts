@@ -7,7 +7,12 @@ import { defineConfig } from 'vite'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 
+// Prefijo público donde se sirve la app. Vacío = raíz del dominio.
+// En prod lo pone el build arg BASE_PATH del Dockerfile (ver docs/vps-https.md).
+const base = process.env.VITE_BASE_PATH?.trim() || '/'
+
 export default defineConfig({
+  base,
   plugins: [vue(), tailwindcss()],
   worker: { format: 'es' },
   optimizeDeps: {

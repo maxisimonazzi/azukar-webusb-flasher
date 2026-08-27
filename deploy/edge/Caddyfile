@@ -1,0 +1,38 @@
+# Un sitio, varias apps. Caddy saca el certificado de Let's Encrypt solo
+# (necesita 80 y 443 abiertos y el DNS ya apuntando al VPS) y rutea por path
+# a contenedores que están en la red `edge` y no publican ningún puerto.
+#
+# Para recibir los avisos de vencimiento, descomentá el bloque global:
+# {
+# 	email vos@ejemplo.com
+# }
+
+maxisimonazzi.com.ar {
+	redir https://www.maxisimonazzi.com.ar{uri} permanent
+}
+
+www.maxisimonazzi.com.ar {
+	encode zstd gzip
+
+	# Grabador Lattice WebUSB. El alias `grabador-lattice` lo pone
+	# docker-compose.edge.yml del repo lattice-webusb-flasher.
+	# El path NO se recorta: la app está compilada con BASE_PATH y su nginx
+	# sirve el árbol colgando de ese mismo prefijo.
+	redir /grabador-lattice-webusb /grabador-lattice-webusb/ permanent
+	handle /grabador-lattice-webusb/* {
+		reverse_proxy grabador-lattice:80
+	}
+
+	# Landing de la raíz. Cuando exista, levantala con alias `landing` en la
+	# red `edge` y cambiá el respond por: reverse_proxy landing:80
+	handle {
+		respond "maxisimonazzi.com.ar - en obra. Por ahora: /grabador-lattice-webusb/" 200
+	}
+}
+
+# Herramienta nueva = un bloque más acá y un alias más en su compose:
+#
+#	redir /otra-herramienta /otra-herramienta/ permanent
+#	handle /otra-herramienta/* {
+#		reverse_proxy otra-herramienta:80
+#	}

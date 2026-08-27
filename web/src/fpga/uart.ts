@@ -33,11 +33,15 @@ export function hasWebSerial(): boolean {
 
 export type UartSession = {
   close(): Promise<void>
+  /** Manda texto por el TX del canal B. `false` si el puerto no deja escribir. */
+  write(text: string): Promise<boolean>
+  canWrite: boolean
 }
 
 export async function openUartSession(opts: {
   baudRate: number
-  onText: (chunk: string) => void
+  /** Los bytes crudos alimentan la vista hex; el texto ya viene decodificado. */
+  onChunk: (bytes: Uint8Array, text: string) => void
   onDisconnect: () => void
 }): Promise<UartSession> {
   if (!hasWebSerial()) {
@@ -74,7 +78,7 @@ export async function openUartSession(opts: {
         const { value, done } = await reader.read()
         if (done) break
         if (value && value.length) {
-          opts.onText(decoder.decode(value, { stream: true }))
+          opts.onChunk(value, decoder.decode(value, { stream: true }))
         }
       }
     } catch {
@@ -88,7 +92,23 @@ export async function openUartSession(opts: {
       finished()
     }
   })()
+  const encoder = new TextEncoder()
   return {
+    canWrite: Boolean(port.writable),
+    async write(text: string) {
+      if (!port.writable || !text) return false
+      const writer = port.writable.getWriter()
+      try {
+        await writer.write(encoder.encode(text))
+        return true
+      } finally {
+        try {
+          writer.releaseLock()
+        } catch {
+          /* already released */
+        }
+      }
+    },
     async close() {
       closed = true
       try {

@@ -4,6 +4,7 @@
  * Copyright (C) 2015 Claire Xenia Wolf, 2018 Piotr Esden-Tempski (ISC).
  * https://github.com/YosysHQ/icestorm — notice in web/public/THIRD_PARTY_NOTICES.md
  */
+import { compareBins, describeDiff, type BinDiff } from '@/fpga/binCompare'
 import { FLASH_DUMP_CHUNK } from '@/fpga/ftdiUsb'
 import {
   elapsedLine,
@@ -653,6 +654,54 @@ export async function readIce40Flash(
     return out
   } catch (err) {
     logElapsed(log, 'Leer flash', t0, { failed: true })
+    await closeMpsseSession()
+    throw err
+  }
+}
+
+/**
+ * Relee de la flash solo lo que ocupa el bitstream y lo compara. Es la mitad
+ * del ciclo que faltaba: "grabé" deja de ser una suposición. Lee `length`
+ * bytes en vez de los 512 KiB del chip, así tarda lo mismo que grabar.
+ */
+export async function verifyIce40Flash(
+  expected: Uint8Array,
+  log: ProgramLog,
+  onProgress?: ProgramProgress,
+): Promise<BinDiff> {
+  const payload = trimIce40Image(expected)
+  if (payload.length === 0) throw new Error('no hay bitstream para verificar')
+  const t0 = now()
+  const device = await openMpsse(log)
+  try {
+    await step('CRESET assert — mpsse.fpgaResetAssert', log, () =>
+      mpsse.fpgaResetAssert(device),
+    )
+    await mpsse.flashReleasePowerDown(device)
+    const id = await mpsse.flashReadId(device)
+    const size = Math.min(payload.length, flashSizeFromJedec(id))
+    log(`[mpsse] verificando ${size} bytes (JEDEC ${hexBytes(id)})`)
+    const out = new Uint8Array(size)
+    for (let addr = 0; addr < size; addr += FLASH_READ_CHUNK) {
+      const n = Math.min(FLASH_READ_CHUNK, size - addr)
+      out.set(await mpsse.flashRead(device, addr, n), addr)
+      const done = addr + n
+      onProgress?.(done, size, 'read')
+      if (done % 65536 === 0 || done === size) {
+        log(`[mpsse] leídos ${done}/${size} @ 0x${addr.toString(16)}`)
+      }
+      if (done % 4096 === 0) await sleep(0)
+    }
+    await step('CS+CRESET high-Z — mpsse.fpgaResetDeassert', log, () =>
+      mpsse.fpgaResetDeassert(device),
+    )
+    await sleep(250)
+    const diff = compareBins(payload, out)
+    log(`[mpsse] ${describeDiff(diff)}`)
+    logElapsed(log, 'Verificar flash', t0, { bytes: out.length })
+    return diff
+  } catch (err) {
+    logElapsed(log, 'Verificar flash', t0, { failed: true })
     await closeMpsseSession()
     throw err
   }

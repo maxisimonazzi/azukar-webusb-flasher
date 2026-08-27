@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { defaultKeymap, indentWithTab } from '@codemirror/commands'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { lintGutter } from '@codemirror/lint'
 import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
 import { basicSetup } from 'codemirror'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
+import {
+  applyMarks,
+  completionFor,
+  scrollToLine,
+  searchExtension,
+  type EditorMark,
+} from '@/lib/editorExtensions'
 import { pcfLanguage, verilogLanguage, type EditorLanguage } from '@/lib/verilogEditor'
 import { editorFontSizeRef } from '@/prefs/editorFont'
 import { themeRef } from '@/prefs/theme'
@@ -21,15 +29,20 @@ const props = withDefaults(
     fontSize?: number
     /** Grammar for the open file. `.pcf` no es Verilog. */
     language?: EditorLanguage
+    /** Errores y avisos a subrayar, ya filtrados para este archivo. */
+    marks?: EditorMark[]
   }>(),
   {
     heightClass: 'h-72 min-h-72',
     language: 'verilog',
+    marks: () => [],
   },
 )
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
+  /** Ctrl/Cmd+S: en un IDE sin servidor, "guardar" es "revisar". */
+  save: []
 }>()
 
 const host = ref<HTMLDivElement | null>(null)
@@ -87,6 +100,39 @@ const editorChrome = EditorView.theme({
       'color-mix(in oklab, var(--primary) 28%, transparent) !important',
   },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--primary)' },
+  // Paneles que trae CM6: búsqueda, autocompletado y errores.
+  '.cm-panels': {
+    backgroundColor: 'var(--surface-2)',
+    color: 'var(--fg)',
+    borderColor: 'var(--border)',
+  },
+  '.cm-panels input, .cm-panels button, .cm-panels select': {
+    backgroundColor: 'var(--surface)',
+    color: 'var(--fg)',
+    border: '1px solid var(--border)',
+    borderRadius: '0.25rem',
+    padding: '0.1rem 0.35rem',
+  },
+  '.cm-searchMatch': {
+    backgroundColor: 'color-mix(in oklab, var(--primary) 30%, transparent)',
+  },
+  '.cm-searchMatch-selected': {
+    backgroundColor: 'color-mix(in oklab, var(--primary) 55%, transparent)',
+  },
+  '.cm-tooltip': {
+    backgroundColor: 'var(--surface-2)',
+    color: 'var(--fg)',
+    border: '1px solid var(--border)',
+    borderRadius: '0.5rem',
+  },
+  '.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]': {
+    backgroundColor: 'color-mix(in oklab, var(--primary) 22%, transparent)',
+    color: 'var(--fg)',
+  },
+  '.cm-completionDetail': { color: 'var(--muted)', fontStyle: 'normal' },
+  '.cm-diagnostic-error': { borderLeftColor: 'var(--error)' },
+  '.cm-diagnostic-warning': { borderLeftColor: 'var(--warning, var(--primary))' },
+  '.cm-lintRange-error': { paddingBottom: '0.1em' },
 })
 
 function themeExtensions(dark: boolean) {
@@ -118,6 +164,17 @@ function languageExtensions() {
   }
 }
 
+const saveKeymap = keymap.of([
+  {
+    key: 'Mod-s',
+    preventDefault: true,
+    run: () => {
+      emit('save')
+      return true
+    },
+  },
+])
+
 function mountEditor(doc: string) {
   if (!host.value) return
   view?.destroy()
@@ -126,6 +183,10 @@ function mountEditor(doc: string) {
       doc,
       extensions: [
         basicSetup,
+        searchExtension(),
+        completionFor(props.language),
+        lintGutter(),
+        saveKeymap,
         ...languageExtensions(),
         keymap.of([...defaultKeymap, indentWithTab]),
         EditorView.editable.of(!props.readonly),
@@ -140,9 +201,25 @@ function mountEditor(doc: string) {
     }),
     parent: host.value,
   })
+  applyMarks(view, props.marks)
 }
 
 onMounted(() => mountEditor(props.modelValue))
+
+watch(
+  () => props.marks,
+  (marks) => {
+    if (view) applyMarks(view, marks)
+  },
+  { deep: true },
+)
+
+/** Salta a la línea que pidió la consola de problemas. */
+function jumpToLine(line: number) {
+  if (view) scrollToLine(view, line)
+}
+
+defineExpose({ jumpToLine })
 
 watch(
   () => props.modelValue,

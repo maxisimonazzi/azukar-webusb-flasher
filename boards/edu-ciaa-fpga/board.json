@@ -5,7 +5,13 @@
     "arch": "ice40",
     "nextpnr_device": "hx8k",
     "nextpnr_package": "tq144:4k",
-    "pcf": "pins.pcf"
+    "pcf": "pins.pcf",
+    "clocks": [
+      {
+        "name": "CLK",
+        "mhz": 12
+      }
+    ]
   },
   "programmer": {
     "chip": "FT2232H",

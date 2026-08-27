@@ -3,6 +3,7 @@
 #   docker compose up --build -d
 #
 # Proyecto Docker: lattice-yowasp-* (no pisa lattice-webusb-flasher-* en :8080).
+# Para el VPS se le suma el overlay docker-compose.edge.yml (ver docs/vps-https.md).
 
 name: lattice-yowasp
 
@@ -12,7 +13,8 @@ services:
       context: .
       dockerfile: web/Dockerfile
       args:
-        VITE_ALLOWED_IMPORT_EXTENSIONS: ${ALLOWED_IMPORT_EXTENSIONS:-v,pcf,txt}
+        VITE_ALLOWED_IMPORT_EXTENSIONS: ${ALLOWED_IMPORT_EXTENSIONS:-v,pcf,txt,hex}
+        BASE_PATH: ${BASE_PATH-}
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-9090}:80"

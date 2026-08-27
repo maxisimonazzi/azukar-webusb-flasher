@@ -9,9 +9,11 @@ import {
 } from './files.ts'
 
 export const MAX_FILES = 100
-export const MAX_CHARS = 80_000
-export const MAX_FILE_CHARS = 20_000
+export const MAX_CHARS = 400_000
+export const MAX_FILE_CHARS = 100_000
 export const MAX_PCF_CHARS = 40_000
+/** Un `.hex` de ROM (icebram / $readmemh) es largo y aburrido: se lo permite. */
+export const MAX_HEX_CHARS = 300_000
 
 export const TOKEN_RE = /^[A-Za-z0-9_.:-]+$/
 
@@ -27,6 +29,14 @@ export type CompileJob = {
   yosysArgs: string[]
   nextpnrArgs: string[]
   icepackArgs: string[]
+  files: Record<string, string>
+  /** Para atribuir los "(on line N)" de nextpnr al archivo correcto. */
+  pcfName: string
+}
+
+/** Revisión rápida: solo `read_verilog` + `hierarchy -check`, sin place & route. */
+export type CheckJob = {
+  yosysArgs: string[]
   files: Record<string, string>
 }
 
@@ -62,7 +72,9 @@ export function buildCompileJob(
     if (!FPGA_NAME_RE.test(file.name) && !pcf && !isAllowedFilename(file.name)) {
       fail('COMPILE_BAD_INPUT')
     }
-    if (file.content.length > (pcf ? MAX_PCF_CHARS : MAX_FILE_CHARS)) fail('COMPILE_TOO_LARGE')
+    const hex = file.name.toLowerCase().endsWith('.hex')
+    const limit = pcf ? MAX_PCF_CHARS : hex ? MAX_HEX_CHARS : MAX_FILE_CHARS
+    if (file.content.length > limit) fail('COMPILE_TOO_LARGE')
     if (seen.has(file.name)) fail('COMPILE_BAD_INPUT')
     seen.add(file.name)
     total += file.content.length
@@ -90,6 +102,36 @@ export function buildCompileJob(
       'out.pnr',
     ],
     icepackArgs: ['out.asc', 'out.bin'],
+    files: tree,
+    pcfName: pcfFile.name,
+  }
+}
+
+/**
+ * El chequeo rápido: leer los `.v` y correr `hierarchy -check`. Encuentra
+ * errores de sintaxis, módulos que faltan y puertos mal conectados en segundos,
+ * sin esperar synth + place & route.
+ */
+export function buildCheckJob(files: CompileFile[], top: string): CheckJob {
+  const topName = top.trim()
+  if (!FPGA_IDENT_RE.test(topName)) fail('COMPILE_BAD_INPUT')
+  if (!files.length || files.length > MAX_FILES) fail('COMPILE_TOO_LARGE')
+
+  const names: string[] = []
+  const tree: Record<string, string> = {}
+  let total = 0
+  for (const file of files) {
+    if (!FPGA_NAME_RE.test(file.name) && !isAllowedFilename(file.name)) continue
+    if (isPcfFilename(file.name)) continue
+    total += file.content.length
+    if (total > MAX_CHARS) fail('COMPILE_TOO_LARGE')
+    tree[file.name] = file.content
+    if (file.name.toLowerCase().endsWith('.v')) names.push(file.name)
+  }
+  if (!names.length) fail('COMPILE_BAD_INPUT')
+
+  return {
+    yosysArgs: ['-Q', '-p', `hierarchy -check -top ${topName}`, ...names],
     files: tree,
   }
 }

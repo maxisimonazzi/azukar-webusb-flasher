@@ -96,6 +96,12 @@ export type BoardHelp = {
 
 export type BoardKind = 'listed' | 'custom'
 
+/** Relojes que la placa trae en el silicio: alimentan el `set_frequency`. */
+export type BoardClock = {
+  name: string
+  mhz: number
+}
+
 export type BoardProfile = {
   id: string
   title: string
@@ -105,6 +111,7 @@ export type BoardProfile = {
     nextpnr_device: string
     nextpnr_package: string
     pcf: string
+    clocks?: BoardClock[]
   }
   programmer: {
     chip: string

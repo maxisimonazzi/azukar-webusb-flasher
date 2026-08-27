@@ -32,6 +32,9 @@ set_io -nowarn LED7 45  #-- output
 set_io -nowarn CLK12 49    # input
 set_io -nowarn CLK100 129  # input
 
+set_frequency CLK12 12
+#set_frequency CLK100 100   # descomentalo si el diseño usa CLK100
+
 # ------------ FTDI (Virtual Serial port)
 set_io -nowarn RX  64  # input
 set_io -nowarn TX  63  # output

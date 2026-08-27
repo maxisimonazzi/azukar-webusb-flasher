@@ -1,0 +1,22 @@
+# VPS: la app no publica puertos. El único que toca 80/443 es el Caddy compartido
+# de deploy/edge/, que la alcanza por la red Docker `edge`.
+#
+#   docker network create edge          # una vez por VPS
+#   docker compose -f docker-compose.yml -f docker-compose.edge.yml up --build -d
+#
+# En esta PC no lo uses: sin la red `edge` y sin dominio no aporta nada.
+
+services:
+  web:
+    ports: !override []
+    networks:
+      default: {}
+      edge:
+        aliases:
+          # Nombre con el que el Caddy del borde encuentra este contenedor.
+          # Tiene que coincidir con el reverse_proxy de deploy/edge/Caddyfile.
+          - grabador-lattice
+
+networks:
+  edge:
+    external: true
