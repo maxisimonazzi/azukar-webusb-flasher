@@ -10,3 +10,4 @@ web/node_modules/
 web/dist/
 *.tsbuildinfo
 __pycache__/
+docs/

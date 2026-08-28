@@ -26,20 +26,16 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 
-COPY web/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /src/web/dist /stage/
-COPY --from=build /src/web/node_modules/@yowasp/yosys /stage/yowasp/yosys
-COPY --from=build /src/web/node_modules/@yowasp/nextpnr-ice40 /stage/yowasp/nextpnr-ice40
-
-# La SPA queda colgando del prefijo dentro del docroot; el resto del docroot
-# queda vacío (la página "Welcome to nginx" no llega a producción).
 ARG BASE_PATH=""
-RUN set -eu; \
-    rm -rf /usr/share/nginx/html/*; \
-    dest="/usr/share/nginx/html${BASE_PATH}"; \
-    mkdir -p "$dest"; \
-    cp -a /stage/. "$dest/"; \
-    rm -rf /stage
+
+COPY web/nginx.conf /etc/nginx/conf.d/default.conf
+
+# La página "Welcome to nginx" no llega a producción.
+RUN rm -f /usr/share/nginx/html/index.html /usr/share/nginx/html/50x.html
+
+COPY --from=build /src/web/dist /usr/share/nginx/html${BASE_PATH}/
+COPY --from=build /src/web/node_modules/@yowasp/yosys /usr/share/nginx/html${BASE_PATH}/yowasp/yosys
+COPY --from=build /src/web/node_modules/@yowasp/nextpnr-ice40 /usr/share/nginx/html${BASE_PATH}/yowasp/nextpnr-ice40
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

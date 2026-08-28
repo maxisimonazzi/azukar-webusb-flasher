@@ -17,9 +17,11 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp"
+    environment:
+      TZ: ${TZ:-America/Argentina/Buenos_Aires}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      # El certificado vive acá. No borres este volumen (nada de `down -v`).
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:

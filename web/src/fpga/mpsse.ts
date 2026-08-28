@@ -533,7 +533,6 @@ export async function bitbangSlaveEdge(device: USBDevice): Promise<void> {
  */
 
 const SIO_SET_BAUDRATE = 0x03
-const BITMODE_RESET = 0x00
 const BITMODE_BITBANG = 0x01
 
 /**
@@ -549,7 +548,7 @@ const BITMODE_BITBANG = 0x01
  *
  * NO es el cuello: iceram.c usa 25000 baud (divisor 480, treinta veces mas
  * lento) y aun asi va mas rapido. Los dos estamos limitados por el throughput
- * de USB, no por el generador. El lever es pipelineDepth, no este numero.
+ * de USB, no por el generador de baudios.
  */
 export const BITBANG_BAUD_VALUE = 0x0010
 const BITBANG_BAUD_INDEX = 0x0201
@@ -585,21 +584,33 @@ function vendorOutIndex(
  * parsea como comandos y el chip queda inservible hasta el proximo enchufe.
  * Purgamos RX y TX pero NO mandamos SIO_RESET_SIO, que glitchea los pines.
  */
+/**
+ * Salida del modo bitbang, de vuelta a MPSSE.
+ *
+ * El orden importa y esta medido contra la placa. La version anterior mandaba
+ * SIO_SET_BITMODE con BITMODE_RESET antes de entrar a MPSSE: eso devuelve el
+ * canal a su funcion por defecto (UART), donde ADBUS7 deja de ser una salida
+ * nuestra, y la FPGA perdia la configuracion en esa ventana. Se veia como CDONE
+ * en 1 adentro del bitbang y en 0 apenas se salia.
+ *
+ * Sin ese paso, la configuracion sobrevive. Las purgas van DESPUES de manejar
+ * CRESET: limpian el FIFO de lectura, que quedo lleno de muestras del bitbang y
+ * haria que la proxima lectura MPSSE devuelva estados viejos.
+ */
 async function leaveBitbangMode(device: USBDevice): Promise<void> {
-  await vendorOut(device, SIO_SET_BITMODE, (BITMODE_RESET << 8) | 0x00)
-  await vendorOut(device, SIO_RESET_REQUEST, SIO_RESET_PURGE_RX)
-  await vendorOut(device, SIO_RESET_REQUEST, SIO_RESET_PURGE_TX)
   await vendorOut(device, SIO_SET_BITMODE, (BITMODE_MPSSE << 8) | 0x00)
   const hold = iceprogSramReleaseCs()
   await send(device, [
-    MC_TCK_D5,
     MC_SETB_LOW,
     hold.value,
     hold.direction,
+    MC_TCK_D5,
     MC_SET_CLK_DIV,
     0,
     0,
   ])
+  await vendorOut(device, SIO_RESET_REQUEST, SIO_RESET_PURGE_RX)
+  await vendorOut(device, SIO_RESET_REQUEST, SIO_RESET_PURGE_TX)
 }
 
 /**
@@ -610,42 +621,20 @@ async function leaveBitbangMode(device: USBDevice): Promise<void> {
  * salida del bitbang arranca en 0 (CS abajo, CRESET abajo, SCK abajo), que es
  * exactamente el estado de reset, asi que el arranque no glitchea nada.
  */
-export type BitbangModeOptions = {
-  /**
-   * SCK en reposo alto = modo 3, lo que usan `iceram.c` y openFPGALoader.
-   * Jesus Arias sostiene que la iCE40 lo necesita para slave; nuestro camino por
-   * GPIO del MPSSE anda con reposo bajo (modo 0), asi que no sabemos si el modo
-   * 0 es tolerado o si estamos en un margen.
-   */
-  clockIdleHigh: boolean
-  /**
-   * Subir SS despues del flanco de CRESET para deseleccionar la flash, como
-   * hace `iceram.c`. SPI_SS_B solo se muestrea en ese flanco, asi que despues
-   * se puede soltar. Evita tener que dormir la NOR con 0xB9 — y evita el modo
-   * de falla "placa congelada" cuando algo se corta a mitad de camino.
-   */
-  raiseSsAfterEdge: boolean
-  /** Cuantos transferOut dejar en vuelo. 1 = secuencial (como estaba). */
-  pipelineDepth: number
-  /** Vaciar el endpoint IN durante el shift (ver nota de contrapresion). */
-  drainIn: boolean
-  /** Tamano de cada transferOut, en bytes de estados de pines. */
-  chunkBytes: number
-  /**
-   * Divisor de baudios crudo (wValue). Mas chico = mas rapido.
-   * 0x0010 es el punto de partida medido; ver BITBANG_BAUD_VALUE.
-   */
-  baudValue: number
-}
+/**
+ * SCK en reposo alto = SPI modo 3, lo que usan `iceram.c` y openFPGALoader.
+ * Con reposo bajo (modo 0) el camino por GPIO del MPSSE tambien levanta CDONE,
+ * asi que no sabemos si el modo 0 es tolerado o si estabamos en un margen.
+ */
+const CLOCK_IDLE_HIGH = true
 
-export const BITBANG_MODE_DEFAULTS: BitbangModeOptions = {
-  clockIdleHigh: true,
-  raiseSsAfterEdge: true,
-  pipelineDepth: 1,
-  drainIn: false,
-  chunkBytes: BITBANG_MODE_CHUNK,
-  baudValue: BITBANG_BAUD_VALUE,
-}
+/**
+ * Subir SS despues del flanco de CRESET para deseleccionar la flash, como hace
+ * `iceram.c`. SPI_SS_B solo se muestrea en ese flanco, asi que despues se puede
+ * soltar. Evita tener que dormir la NOR con 0xB9 — y evita el modo de falla
+ * "placa congelada" cuando algo se corta a mitad de camino.
+ */
+const RAISE_SS_AFTER_EDGE = true
 
 /**
  * Lee el estado de los pines SIN salir del modo bitbang.
@@ -687,42 +676,28 @@ export async function readPinsFromBitbang(device: USBDevice): Promise<number> {
  * Precondicion: la FPGA en reset. El latch de salida del bitbang arranca en 0
  * (todo abajo), que es el estado de reset, y ademas escribimos ese estado dos
  * veces para garantizar el ancho minimo del pulso.
- *
- * Devuelve el ADBUS leido despues de los 49 clocks, sin haber salido del modo.
  */
-export type BitbangShiftStats = {
-  /** ADBUS leido despues de los 49 clocks, sin haber salido del modo. */
-  pins: number
-  /** Milisegundos armando los estados de pines en JS. */
-  msArmado: number
-  /** Milisegundos adentro de transferOut. */
-  msUsb: number
-}
-
 export async function bitbangModeSramShift(
   device: USBDevice,
   payload: Uint8Array,
-  opts: BitbangModeOptions,
   onProgress?: (done: number) => void,
-): Promise<BitbangShiftStats> {
+): Promise<void> {
   const direction = iceprogBitbangDirection()
   const map = getActiveAdbus()
   const sck = 1 << map.sck
   const creset = 1 << map.creset
   const ss = 1 << map.cs
 
-  const reposo = opts.clockIdleHigh ? sck : 0
+  const reposo = CLOCK_IDLE_HIGH ? sck : 0
   // Durante el shift: CRESET arriba siempre; SS arriba solo si lo soltamos.
-  const base = creset | (opts.raiseSsAfterEdge ? ss : 0)
+  const base = creset | (RAISE_SS_AFTER_EDGE ? ss : 0)
   // [dato][reloj] — el dato se pone con SCK abajo y se muestrea al subir.
   const v = [base, base | sck, base | PIN_DATA_IN, base | PIN_DATA_IN | sck]
 
-  // Si estos control transfers no se aceptan, el divisor nunca se aplica y el
-  // barrido de velocidad sale plano — que es exactamente lo que vimos.
   const rBaud = await vendorOutIndex(
     device,
     SIO_SET_BAUDRATE,
-    opts.baudValue,
+    BITBANG_BAUD_VALUE,
     BITBANG_BAUD_INDEX,
   )
   const rModo = await vendorOut(
@@ -748,44 +723,22 @@ export async function bitbangModeSramShift(
     // FPGA necesita para limpiar su CRAM (>1200 us segun el datasheet).
     await sleep(10)
 
-    if (opts.raiseSsAfterEdge) {
+    if (RAISE_SS_AFTER_EDGE) {
       // Ya latcheo el modo: soltamos SS y la flash queda deseleccionada.
       await device.transferOut(OUT_EP, new Uint8Array([base | reposo]))
       await sleep(1)
     }
 
-    const tope = Math.max(64, opts.chunkBytes)
-    const buf = new Uint8Array(tope)
+    const buf = new Uint8Array(BITBANG_MODE_CHUNK)
     let n = 0
-    let msArmado = 0
-    let msUsb = 0
-    let bloques = 0
-    const enVuelo: Promise<USBOutTransferResult>[] = []
-    const profundidad = Math.max(1, opts.pipelineDepth)
-
     const flush = async (): Promise<void> => {
       if (n === 0) return
-      const t = performance.now()
-      // Copia: el buffer se reutiliza y con transferOut encolados el original
-      // se pisaria antes de que el navegador lo lea.
-      enVuelo.push(device.transferOut(OUT_EP, buf.slice(0, n)))
+      // Copia: el buffer se reutiliza y el original se pisaria antes de que el
+      // navegador termine de leerlo.
+      await device.transferOut(OUT_EP, buf.slice(0, n))
       n = 0
-      while (enVuelo.length >= profundidad) await enVuelo.shift()
-      msUsb += performance.now() - t
-      bloques += 1
-      // En bitbang asincronico el chip tambien muestrea los pines hacia el FIFO
-      // de lectura. Si nadie lo vacia se llena, y ese trafico IN puede estar
-      // compitiendo con nuestro OUT. Vaciarlo dice si eso nos frena.
-      if (opts.drainIn && bloques % 8 === 0) {
-        try {
-          await device.transferIn(IN_EP, FTDI_BULK_PACKET * 8)
-        } catch {
-          // si no hay nada que leer, seguimos
-        }
-      }
     }
 
-    let tArmado = performance.now()
     for (let i = 0; i < payload.length; i++) {
       const byte = payload[i] ?? 0
       for (let bit = 7; bit >= 0; bit--) {
@@ -793,16 +746,12 @@ export async function bitbangModeSramShift(
         buf[n++] = v[data * 2] ?? 0
         buf[n++] = v[data * 2 + 1] ?? 0
       }
-      if (n + 16 > tope) {
-        msArmado += performance.now() - tArmado
+      if (n + 16 > BITBANG_MODE_CHUNK) {
         await flush()
         onProgress?.(i + 1)
-        tArmado = performance.now()
       }
     }
-    msArmado += performance.now() - tArmado
     await flush()
-    while (enVuelo.length > 0) await enVuelo.shift()
     onProgress?.(payload.length)
 
     // Los 49 clocks del datasheet, para que los pines de usuario cobren vida.
@@ -813,17 +762,13 @@ export async function bitbangModeSramShift(
     }
     await device.transferOut(OUT_EP, cola)
 
-    // La lectura que importa, todavia adentro del bitbang. CDONE no sube en el
-    // mismo instante en que termina el shift, asi que hay que darle tiempo:
-    // una sola muestra lo agarra todavia en 0 y miente.
+    // CDONE no sube en el mismo instante en que termina el shift: una sola
+    // muestra lo agarra todavia en 0 y miente.
     const cdoneBit = 1 << map.cdone
-    let pines = 0
     const limite = Date.now() + 300
     do {
-      pines = await readPinsFromBitbang(device)
-      if (pines & cdoneBit) break
+      if ((await readPinsFromBitbang(device)) & cdoneBit) break
     } while (Date.now() < limite)
-    return { pins: pines, msArmado, msUsb }
   } finally {
     await leaveBitbangMode(device)
   }

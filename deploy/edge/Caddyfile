@@ -2,10 +2,20 @@
 # (necesita 80 y 443 abiertos y el DNS ya apuntando al VPS) y rutea por path
 # a contenedores que están en la red `edge` y no publican ningún puerto.
 #
-# Para recibir los avisos de vencimiento, descomentá el bloque global:
-# {
-# 	email vos@ejemplo.com
-# }
+# El bloque global va primero y vale para todo el archivo.
+{
+	# Sin esto el log sale con la hora en epoch. `time_local` la pasa a la zona
+	# del contenedor, que fija TZ en docker-compose.yml.
+	log {
+		format console {
+			time_format "2006-01-02 15:04:05"
+			time_local
+		}
+	}
+
+	# Para recibir los avisos de vencimiento de Let's Encrypt, descomentá:
+	# email vos@ejemplo.com
+}
 
 maxisimonazzi.com.ar {
 	redir https://www.maxisimonazzi.com.ar{uri} permanent
@@ -23,10 +33,18 @@ www.maxisimonazzi.com.ar {
 		reverse_proxy grabador-lattice:80
 	}
 
-	# Landing de la raíz. Cuando exista, levantala con alias `landing` en la
-	# red `edge` y cambiá el respond por: reverse_proxy landing:80
-	handle {
+	# Landing de la raíz. Cuando exista, levantala con alias `landing` en la red
+	# `edge` y reemplazá estos dos bloques por un solo: reverse_proxy landing:80
+	#
+	# `handle /` es match exacto: solo la raíz. Cualquier otra URL del dominio
+	# cae en el `handle` sin matcher y contesta 404, para no devolver 200 en
+	# rutas que no existen (los buscadores indexarían basura).
+	handle / {
 		respond "maxisimonazzi.com.ar - en obra. Por ahora: /grabador-lattice-webusb/" 200
+	}
+
+	handle {
+		respond "No encontrado" 404
 	}
 }
 
@@ -36,3 +54,29 @@ www.maxisimonazzi.com.ar {
 #	handle /otra-herramienta/* {
 #		reverse_proxy otra-herramienta:80
 #	}
+
+# Un segundo dominio en el mismo VPS es otro bloque de sitio, nada más. Caddy
+# saca un certificado por cada uno. Cuando toque azukar.com.ar, descomentá:
+#
+# azukar.com.ar {
+# 	redir https://www.azukar.com.ar{uri} permanent
+# }
+#
+# www.azukar.com.ar {
+# 	encode zstd gzip
+# 	reverse_proxy azukar-web:80
+# }
+
+# Si algún día ponés Cloudflare en modo proxy (nubecita naranja), el origen deja
+# de ver la IP del visitante: ve la de Cloudflare. Para que Caddy le crea al
+# X-Forwarded-For hay que declarar los rangos de CF como proxies de confianza,
+# en un bloque global arriba de todo:
+#
+# {
+# 	servers {
+# 		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 …
+# 	}
+# }
+#
+# Hoy no hace falta: la app es estática, no loguea ni limita por IP.
+# Lista actualizada: https://www.cloudflare.com/ips/

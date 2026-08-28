@@ -36,7 +36,11 @@ docker compose restart caddy
 1. En el compose de la app: nada de `ports`, y un alias en la red `edge`
    (ver `docker-compose.edge.yml` del grabador).
 2. En `Caddyfile`: un `handle /lo-que-sea/*` con `reverse_proxy <alias>:80`.
-3. `docker compose up -d` acá (Caddy recarga la config; el certificado no se toca).
+3. Recargar Caddy acá:
+   `docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile`
+   En caliente, sin cortar conexiones y sin tocar el certificado. **No sirve
+   `docker compose up -d`**: el Caddyfile es un bind mount, la definición del
+   servicio no cambia y Compose deja el contenedor como está.
 
 Si la app es una SPA con URLs absolutas, compilala con su prefijo (`BASE_PATH`
 en el grabador). La otra opción es `handle_path`, que recorta el prefijo antes
