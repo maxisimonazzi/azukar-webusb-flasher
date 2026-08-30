@@ -48,13 +48,32 @@ export async function openUartSession(opts: {
     throw new Error('NEED_WEB_SERIAL')
   }
   const port = await navigator.serial!.requestPort({ filters: uartSerialFilters() })
-  await port.open({
+  const serialOptions: SerialOptions = {
     baudRate: opts.baudRate,
     dataBits: 8,
     stopBits: 1,
     parity: 'none',
     flowControl: 'none',
-  })
+  }
+
+  try {
+    await port.open(serialOptions)
+  } catch (err: unknown) {
+    const isAlreadyOpen =
+      (err instanceof DOMException && err.name === 'InvalidStateError') ||
+      (err instanceof Error && err.message.toLowerCase().includes('already open'))
+    if (isAlreadyOpen) {
+      try {
+        await port.close()
+        await port.open(serialOptions)
+      } catch {
+        throw err
+      }
+    } else {
+      throw err
+    }
+  }
+
   if (!port.readable) {
     try {
       await port.close()
@@ -63,56 +82,135 @@ export async function openUartSession(opts: {
     }
     throw new Error('UART_NO_READABLE')
   }
+
   const decoder = new TextDecoder()
-  const reader = port.readable.getReader()
+  const encoder = new TextEncoder()
+
+  let keepReading = true
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
+  let writer: WritableStreamDefaultWriter<Uint8Array> | null = null
   let closed = false
-  const finished = () => {
+
+  const finished = async () => {
     if (closed) return
     closed = true
-    opts.onDisconnect()
-  }
-  port.addEventListener('disconnect', finished)
-  void (async () => {
-    try {
-      while (true) {
-        const { value, done } = await reader.read()
-        if (done) break
-        if (value && value.length) {
-          opts.onChunk(value, decoder.decode(value, { stream: true }))
-        }
-      }
-    } catch {
-      /* unplug or cancel */
-    } finally {
+    keepReading = false
+    if (reader) {
       try {
-        reader.releaseLock()
+        await reader.cancel()
+      } catch {
+        /* already released or closed */
+      }
+    }
+    if (writer) {
+      try {
+        writer.releaseLock()
       } catch {
         /* already released */
       }
-      finished()
+      writer = null
+    }
+    try {
+      await readLoopPromise
+    } catch {
+      /* ignore */
+    }
+    try {
+      await port.close()
+    } catch {
+      /* ignore */
+    }
+    opts.onDisconnect()
+  }
+
+  port.addEventListener('disconnect', () => {
+    void finished()
+  })
+
+  const readLoopPromise = (async () => {
+    while (port.readable && keepReading) {
+      try {
+        reader = port.readable.getReader()
+      } catch {
+        break
+      }
+      try {
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) {
+            keepReading = false
+            break
+          }
+          if (value && value.length) {
+            opts.onChunk(value, decoder.decode(value, { stream: true }))
+          }
+        }
+      } catch (err) {
+        // Non-fatal read errors: FramingError, BufferOverrunError, BreakError, ParityError
+        // (common when baud rate is mismatched or noise on the line).
+        // Releasing the reader lock allows port.readable to construct a new stream for the next iteration.
+        console.warn('WebSerial read error (framing/parity/overrun):', err)
+      } finally {
+        try {
+          reader.releaseLock()
+        } catch {
+          /* already released */
+        }
+        reader = null
+      }
     }
   })()
-  const encoder = new TextEncoder()
+
+  void readLoopPromise.then(async () => {
+    if (!closed && keepReading) {
+      await finished()
+    }
+  })
+
   return {
-    canWrite: Boolean(port.writable),
+    get canWrite() {
+      return Boolean(port.writable && !closed)
+    },
     async write(text: string) {
-      if (!port.writable || !text) return false
-      const writer = port.writable.getWriter()
+      if (!port.writable || !text || closed) return false
       try {
+        writer = port.writable.getWriter()
         await writer.write(encoder.encode(text))
         return true
+      } catch {
+        return false
       } finally {
+        if (writer) {
+          try {
+            writer.releaseLock()
+          } catch {
+            /* already released */
+          }
+          writer = null
+        }
+      }
+    },
+    async close() {
+      if (closed) return
+      closed = true
+      keepReading = false
+      if (reader) {
+        try {
+          await reader.cancel()
+        } catch {
+          /* already closed */
+        }
+      }
+      if (writer) {
         try {
           writer.releaseLock()
         } catch {
           /* already released */
         }
+        writer = null
       }
-    },
-    async close() {
-      closed = true
       try {
-        await reader.cancel()
+        await readLoopPromise
       } catch {
         /* already closed */
       }

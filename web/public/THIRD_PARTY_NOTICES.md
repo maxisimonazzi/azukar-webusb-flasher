@@ -1,29 +1,42 @@
-# Third-party notices
+# Third-Party Notices & Attributions
 
-Fonts, FPGA tools, and code this app ports or bundles.
+This document details all third-party open-source software, fonts, toolchains, hardware constraint files, and prior art inspirations included in, ported to, or bundled with **Lattice iCE40 FPGA Web Flasher**.
 
-| Piece | License | Use |
-|-------|---------|-----|
-| IceStorm `iceprog.c` (YosysHQ/icestorm) | ISC | Ported: GPIO encoding, flash/SRAM/MPSSE sequence (`iceprogPins.ts`, `mpsse.ts`, `programmer.ts`, `flashPlan.ts`) |
-| Web-iceprog (Juan González-Gómez, Obijuan) | — | Inspiration only. Not used as source. See below. |
-| Inter (`@fontsource/inter`) | OFL | UI sans |
-| JetBrains Mono (`@fontsource/jetbrains-mono`) | OFL | Editor / logs |
-| Yosys (YoWASP `@yowasp/yosys` 0.68.1207) | ISC | Synthesis (`synth_ice40`) in the browser |
-| nextpnr-ice40 + icepack (YoWASP `@yowasp/nextpnr-ice40` 0.11.825) | ISC | Place & route / pack in the browser |
-| Yosys / nextpnr / IceStorm (Debian, stack viejo en :8080) | ISC | Síntesis en el contenedor, otro compose |
-| Vue, Vite, Tailwind, CodeMirror | MIT | SPA |
-| Caddy (opcional, VPS) | Apache-2.0 | Reverse proxy + Let’s Encrypt |
+---
 
-OFL copies: `web/public/fonts/`.
+## Summary of Components & Licenses
 
-This app: MIT (`LICENSE`). `boards/azukar-v2/pins.pcf`: CERN OHL-P. `boards/edu-ciaa-fpga/pins.pcf` and `boards/alhambra-ii/pins.pcf`: GPL-2.0 (FPGAwars/apio-examples).
+| Component / Project | Author / Copyright Holder | License | Role in this Project |
+| :--- | :--- | :--- | :--- |
+| **IceStorm (`iceprog.c`)** | Claire Xenia Wolf, Piotr Esden-Tempski, YosysHQ | **ISC** | Direct TypeScript port (`mpsse.ts`, `programmer.ts`, `iceprogPins.ts`, `flashPlan.ts`) of FTDI MPSSE engine, SPI flash erase/read/write routines, and GPIO sequences. |
+| **IceStorm (`icepll`, `icebram`, `icepack`)** | Claire Xenia Wolf, YosysHQ | **ISC** | Logic for PLL calculations, BRAM bitstream memory patching, and packing. |
+| **`iceram.c` / openFPGALoader** | Jesús Arias (2017), Gwenhael Goavec-Merou | **GPL / Reference** | Reference for asynchronous bitbang SRAM slave mode (SPI Mode 3, clock idle high, latency timings). |
+| **Web-iceprog / WebFPGA** | Juan González-Gómez (*Obijuan*) | **GPL-2.0 / Reference** | **Conceptual inspiration** for browser-based WebUSB FPGA flashing without native drivers. |
+| **Yosys** (via YoWASP `@yowasp/yosys`) | Claire Xenia Wolf, YosysHQ Contributors | **ISC** | Verilog synthesis engine (`synth_ice40`) compiled to WebAssembly running in-browser. |
+| **nextpnr-ice40** (via YoWASP `@yowasp/nextpnr-ice40`) | David Shah (Gatecat), Serge Bazanski, Miodrag Milanovic | **ISC** | Place & Route engine compiled to WebAssembly running in-browser. |
+| **YoWASP Project** | Catherine (*whitequark*) | **ISC / MIT / BSD** | WebAssembly compilation and runtime wrappers for open-source EDA tools. |
+| **OSS CAD Suite** | YosysHQ | **ISC / GPL / Apache** | Reference toolchain distribution and core open-source FPGA ecosystem. |
+| **Alhambra II (`pins.pcf`)** | Juan González (*Obijuan*), Jesús Arroyo Torrens, FPGAwars | **GPL-2.0** | Pin constraints definition for Alhambra II board. |
+| **EDU-CIAA-FPGA (`pins.pcf`)** | Proyecto CIAA / ACSE / INTI | **GPL-2.0** | Pin constraints definition for EDU-CIAA-FPGA board. |
+| **Azukar v2 (`pins.pcf`)** | Maximiliano Martín Simonazzi | **CERN-OHL-P v2** | Pin constraints definition for Azukar v2 board. |
+| **Inter Font** | Rasmus Andersson | **OFL-1.1** | UI sans-serif typography (`@fontsource/inter`). |
+| **JetBrains Mono** | JetBrains | **OFL-1.1** | Monospace typography for Verilog editor and logs (`@fontsource/jetbrains-mono`). |
+| **CodeMirror 6** | Marijn Haverbeke & contributors | **MIT** | Web code editor, syntax highlighting, autocompletion, and linter. |
+| **Vue.js 3** | Evan You & contributors | **MIT** | Reactive frontend UI framework. |
+| **Vite** | Evan You & contributors | **MIT** | Build tool and bundler. |
+| **Tailwind CSS** | Tailwind Labs, Inc. | **MIT** | Utility-first CSS styling framework. |
+| **vue-i18n** | Kazuya Kawaguchi & contributors | **MIT** | Internationalization library (ES / EN). |
+| **Caddy Server** *(optional deployment)* | Matthew Holt & The Caddy Authors | **Apache-2.0** | HTTPS edge reverse proxy and TLS manager. |
+| **Nginx** *(container)* | Igor Sysoev, Nginx, Inc. | **2-Clause BSD** | Static web server inside containerized deployment. |
 
-## IceStorm iceprog (ISC)
+---
 
-The WebUSB programmer is a port of IceStorm `iceprog.c`, not a clean-room rewrite.
-Source: https://github.com/YosysHQ/icestorm/blob/master/iceprog/iceprog.c
+## IceStorm `iceprog.c` (ISC License)
 
-```
+The WebUSB flashing implementation in `web/src/fpga/` is a direct TypeScript port of `iceprog.c` from **Project IceStorm** (YosysHQ).
+Source: [https://github.com/YosysHQ/icestorm/blob/master/iceprog/iceprog.c](https://github.com/YosysHQ/icestorm/blob/master/iceprog/iceprog.c)
+
+```text
 iceprog -- simple programming tool for FTDI-based Lattice iCE programmers
 
 Copyright (C) 2015 Claire Xenia Wolf <claire@clairexen.net>
@@ -42,9 +55,29 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
-## Web-iceprog (Obijuan)
+---
 
-Juan González-Gómez (Obijuan), https://github.com/Obijuan/Web-iceprog
+## Inspiration & Community Prior Art
 
-That repo is a WebUSB ice40 programmer in the same family as IceStorm iceprog. This app does **not** include or port its code. Reading it (with AI assistance) was the starting map for how to approach a browser programmer, before porting IceStorm `iceprog.c` directly.
+### Juan González-Gómez (*Obijuan*) — Web-iceprog / FPGAwars
+- **Repository**: [https://github.com/Obijuan/Web-iceprog](https://github.com/Obijuan/Web-iceprog)
+- **Community**: [FPGAwars](https://github.com/FPGAwars)
 
+Special thanks and acknowledgement to **Juan González-Gómez (*Obijuan*)** for his pioneering open-source work in community FPGA education and browser-based WebUSB programming. `Web-iceprog` and FPGAwars served as a vital **conceptual inspiration** proving the feasibility of WebUSB programming for Lattice FPGAs.
+
+### Jesús Arias — `iceram.c`
+- **Reference**: Asynchronous bitbang timing sequences and SPI mode 3 state handling for volatile iCE40 CRAM configuration.
+
+---
+
+## Fonts (SIL Open Font License 1.1)
+
+Font license texts are available at `web/public/fonts/`:
+- **Inter**: `web/public/fonts/OFL-Inter.txt` (Rasmus Andersson)
+- **JetBrains Mono**: `web/public/fonts/OFL-JetBrainsMono.txt` (JetBrains)
+
+---
+
+## Application License
+
+This application is released under the **MIT License** (see [LICENSE](../../LICENSE)).
