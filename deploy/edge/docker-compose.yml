@@ -1,7 +1,8 @@
-# Borde HTTPS del VPS. Uno solo para todo el dominio: TLS, HTTP->HTTPS y ruteo.
-# No conoce ninguna app: solo nombres en la red `edge`.
+# Borde HTTPS compartido del VPS: TLS, HTTP->HTTPS y ruteo por dominio/path.
+# `edge` llega solo al programador y `azukar-edge` solo a Azukar Toolbox.
 #
-#   docker network create edge      # una vez por VPS
+#   docker network create edge               # una vez por VPS
+#   docker network create azukar-edge        # una vez por VPS
 #   cd deploy/edge && docker compose up -d
 #
 # Vive aparte a propósito: se levanta una vez y no se toca cuando actualizás
@@ -26,9 +27,12 @@ services:
       - caddy_config:/config
     networks:
       - edge
+      - azukar-edge
 
 networks:
   edge:
+    external: true
+  azukar-edge:
     external: true
 
 volumes:

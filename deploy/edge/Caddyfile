@@ -13,8 +13,7 @@
 		}
 	}
 
-	# Para recibir los avisos de vencimiento de Let's Encrypt, descomentá:
-	# email vos@ejemplo.com
+	email maxisimonazzi@gmail.com
 }
 
 maxisimonazzi.com.ar {
@@ -55,17 +54,21 @@ www.maxisimonazzi.com.ar {
 #		reverse_proxy otra-herramienta:80
 #	}
 
-# Un segundo dominio en el mismo VPS es otro bloque de sitio, nada más. Caddy
-# saca un certificado por cada uno. Cuando toque azukar.com.ar, descomentá:
-#
-# azukar.com.ar {
-# 	redir https://www.azukar.com.ar{uri} permanent
-# }
-#
-# www.azukar.com.ar {
-# 	encode zstd gzip
-# 	reverse_proxy azukar-web:80
-# }
+azukar.com.ar {
+	redir https://www.azukar.com.ar{uri} permanent
+}
+
+www.azukar.com.ar {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	reverse_proxy azukar-toolbox:80
+}
 
 # Si algún día ponés Cloudflare en modo proxy (nubecita naranja), el origen deja
 # de ver la IP del visitante: ve la de Cloudflare. Para que Caddy le crea al
@@ -78,5 +81,7 @@ www.maxisimonazzi.com.ar {
 # 	}
 # }
 #
-# Hoy no hace falta: la app es estática, no loguea ni limita por IP.
+# Hoy no hace falta porque ambos dominios están en DNS-only. Antes de activar
+# el proxy hay que coordinar Caddy, nginx, rate limits y el firewall; ver la
+# documentación de producción de Azukar Toolbox.
 # Lista actualizada: https://www.cloudflare.com/ips/
